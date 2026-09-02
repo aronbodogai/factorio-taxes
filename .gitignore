@@ -1,0 +1,7 @@
+*.log
+*.zip
+*.tar.xz
+saves/
+temp/
+.factorio-server/
+node_modules/
