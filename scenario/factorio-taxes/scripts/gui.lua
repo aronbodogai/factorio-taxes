@@ -5,6 +5,9 @@
 -- it is always safe to poke by hand from a console command while testing.
 
 local util = require("scripts.util")
+-- Safe as a top-level require: train_manager requires only config, util, and
+-- rail_infra, none of which require gui, so this cannot create a cycle.
+local train_manager = require("scripts.train_manager")
 
 local gui = {}
 
@@ -56,27 +59,62 @@ local function row_name(entry)
   return "taxes-row__" .. tostring(entry.kind) .. "__" .. tostring(entry.name)
 end
 
---- The row names the demand flow should contain right now, in order.
+--- The row names the demand flow should contain right now, in order. Demand is
+--- array-shaped and refresh() compares this list positionally against what is
+--- on screen, so this must walk it with ipairs and not pairs: pairs makes no
+--- ordering guarantee, and a shuffled order here would make refresh() think
+--- the shape changed every time and force a full rebuild.
 local function expected_row_names(demand)
   local names = {}
-  for _, entry in pairs(demand) do
+  for _, entry in ipairs(demand) do
     names[#names + 1] = row_name(entry)
   end
   return names
 end
 
+--- How much of a demand entry to show as delivered, capped at entry.count so
+--- a momentary over-delivery never drives the bar past 100%. This never
+--- writes back to entry.delivered - settlement in train_manager.settle() owns
+--- that field, the GUI only ever reads it.
+--- @param live_contents table|nil name -> amount currently in the tax wagons,
+---   or nil when the phase is not `loading` and the settled entry.delivered
+---   should be shown instead. A table (possibly empty) means `loading` is in
+---   effect and there is live data to prefer, even if it says zero.
+local function delivered_amount(entry, live_contents)
+  local count = entry.count or 0
+  local amount
+  if live_contents then
+    amount = (entry.name and live_contents[entry.name]) or 0
+  else
+    amount = entry.delivered or 0
+  end
+  if count > 0 and amount > count then amount = count end
+  return amount
+end
+
 --- Fraction of a demand entry that is filled in, clamped to [0, 1] so a
 --- momentary over-delivery never overflows the progress bar.
-local function fraction_filled(entry)
+local function fraction_filled(entry, live_contents)
   local count = entry.count or 0
   if count <= 0 then return 0 end
-  return math.min((entry.delivered or 0) / count, 1)
+  return math.min(delivered_amount(entry, live_contents) / count, 1)
+end
+
+--- Everything currently sitting in the tax wagons, as name -> amount, or an
+--- empty table if train_manager cannot report anything right now. Wrapped in
+--- pcall so a cross-module call can never take the panel down, and normalised
+--- so callers always get a table back, never nil, matching this module's rule
+--- that nothing here is allowed to throw.
+local function live_wagon_contents()
+  local ok, contents = pcall(train_manager.contents)
+  if ok and type(contents) == "table" then return contents end
+  return {}
 end
 
 --- Build one demand row: icon, "delivered / count" label, and a progress bar.
 --- A sprite path is only assigned once helpers confirms it resolves to a
 --- loaded sprite, because handing an invalid path to a sprite element throws.
-local function add_demand_row(parent, entry)
+local function add_demand_row(parent, entry, live_contents)
   local row = parent.add({ type = "flow", name = row_name(entry), direction = "horizontal" })
   row.style.vertical_align = "center"
 
@@ -90,10 +128,10 @@ local function add_demand_row(parent, entry)
   row.add({
     type = "label",
     name = "amount",
-    caption = { "taxes.demand-progress", entry.delivered or 0, entry.count or 0 },
+    caption = { "taxes.demand-progress", delivered_amount(entry, live_contents), entry.count or 0 },
   })
 
-  local bar = row.add({ type = "progressbar", name = "bar", value = fraction_filled(entry) })
+  local bar = row.add({ type = "progressbar", name = "bar", value = fraction_filled(entry, live_contents) })
   bar.style.width = 120
 end
 
@@ -145,11 +183,18 @@ function gui.build(player)
 
   local demand_flow = frame.add({ type = "flow", name = DEMAND_FLOW_NAME, direction = "vertical" })
   local demand = taxes.demand or {}
+  -- Only fetch the live wagon contents when the phase actually needs them, and
+  -- only once for the whole panel: per docs/DESIGN.md section 8, rows read
+  -- live during `loading` and read the settled entry.delivered everywhere else.
+  local live_contents = nil
+  if taxes.phase == "loading" then
+    live_contents = live_wagon_contents()
+  end
   if #demand == 0 then
     demand_flow.add({ type = "label", name = EMPTY_ROW_NAME, caption = { "taxes.no-demand" } })
   else
-    for _, entry in pairs(demand) do
-      add_demand_row(demand_flow, entry)
+    for _, entry in ipairs(demand) do
+      add_demand_row(demand_flow, entry, live_contents)
     end
   end
 end
@@ -223,16 +268,25 @@ function gui.refresh(player)
   countdown_label.caption = { "taxes.countdown-line", util.format_ticks(remaining) }
   cycle_label.caption = { "taxes.cycle-line", taxes.cycle or 0 }
 
-  for _, entry in pairs(demand) do
+  -- During `loading` the settled entry.delivered is still zero - settle() only
+  -- writes it at the end of the window - so read the wagons live instead, per
+  -- docs/DESIGN.md section 8. Fetched at most once per refresh, since this runs
+  -- off a tick handler and every row would otherwise repeat the same call.
+  local live_contents = nil
+  if taxes.phase == "loading" then
+    live_contents = live_wagon_contents()
+  end
+
+  for _, entry in ipairs(demand) do
     local row = demand_flow[row_name(entry)]
     if row and row.valid then
       local amount = row["amount"]
       local bar = row["bar"]
       if amount and amount.valid then
-        amount.caption = { "taxes.demand-progress", entry.delivered or 0, entry.count or 0 }
+        amount.caption = { "taxes.demand-progress", delivered_amount(entry, live_contents), entry.count or 0 }
       end
       if bar and bar.valid then
-        bar.value = fraction_filled(entry)
+        bar.value = fraction_filled(entry, live_contents)
       end
     end
   end
@@ -246,7 +300,13 @@ function gui.refresh_all()
   end
 end
 
---- Remove the panel for one player, if it exists.
+--- Remove the panel for one player, if it exists. Not currently wired to any
+--- event: this scenario registers every event handler in one place, taxes.lua's
+--- `events` table, specifically so the tax cycle composes with base freeplay's
+--- own event_handler library instead of racing it for the same event slot (see
+--- the comment at the top of control.lua). Calling script.on_event directly
+--- from this file would bypass that and risk clobbering a freeplay handler, so
+--- wiring gui.destroy to on_player_left_game belongs in taxes.lua, not here.
 function gui.destroy(player)
   if not (player and player.valid) then return end
   local frame = player.gui.left[PANEL_NAME]

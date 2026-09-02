@@ -95,6 +95,14 @@ taxes.events = {
     if player then gui.build(player) end
   end,
 
+  -- Registration lives here rather than in gui.lua so that every handler in the
+  -- scenario goes through the one event_handler library and none of them race
+  -- base freeplay for the same event slot.
+  [defines.events.on_player_left_game] = function(event)
+    local player = game.get_player(event.player_index)
+    if player then gui.destroy(player) end
+  end,
+
   [defines.events.on_pre_player_mined_item] = function(event)
     rail_infra.on_pre_mined(event)
   end,

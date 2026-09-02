@@ -85,10 +85,18 @@ the returned value itself.
 `train-stop` accepts `backer_name` for its displayed name:
 
 ```lua
-local stop = surface.create_entity{ name = "train-stop", position = { 3, -33 },
+local stop = surface.create_entity{ name = "train-stop", position = { 3, -29 },
                                     direction = defines.direction.east, force = force }
 stop.backer_name = "Tax Station"
 ```
+
+CAUTION about which side. The original probe placed the stop at `{3, -33}`,
+NORTH of a line at `y = -31`, and `create_entity` happily returned an entity —
+but returning non-nil only proves it was placed, not that a train can use it.
+Factorio serves a stop on the RIGHT-hand side relative to travel, so for an
+eastbound train right is `+y`, meaning the stop belongs SOUTH of the line at
+`RAIL_Y + 2`. A north-side stop must instead face west. Do not copy the probe
+position.
 
 ## Enemies
 
@@ -134,3 +142,12 @@ With `electronics` and `advanced-circuit` researched and nothing else, eight
 consecutive demand draws produced `advanced-circuit` every time, with no
 `electronic-circuit` and no tier-1 items. The tier-window rule in DESIGN.md
 section 5 behaves as intended.
+
+## Chunk generation radius is measured in CHUNKS
+
+`surface.request_to_generate_chunks(position, radius)` takes its radius in
+chunks, not tiles. An early version of the rail builder passed `32` from nine
+positions along the line and generated **5645 chunks** at map start, measured
+with `tests/probe_chunks.rcon`. A normal freeplay start is a few hundred. The
+cost is a slow `on_init`, a save inflated by tens of megabytes, and thousands of
+chunks of enemy nests pre-generated. Pass a small radius such as `1`.
