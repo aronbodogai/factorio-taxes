@@ -26,6 +26,19 @@ local STOCK_SPACING = 7
 -- placed at the station is still within STATION_TOLERANCE of the stop.
 local PLACEMENT_SHIFTS = { 0, 2, -2, 4, -4 }
 
+-- How much of its assigned fluid a fluid wagon is seeded with when the train is
+-- built. A fluid wagon has no fluidbox to filter - #wagon.fluidbox is 0 on
+-- 2.0.77 and both get_filter and set_filter raise "index is out of range" - but
+-- the engine refuses to mix two fluids in one container, so a wagon holding a
+-- trace of a fluid is bound to it for the life of the train. That is the fluid
+-- side of the slot filter guarantee, and one unit is all it takes.
+local SEED_AMOUNT = 1
+
+-- What a player can actually deliver into a seeded wagon. Composition has to
+-- use this rather than the raw capacity, otherwise a demand of exactly four
+-- wagonloads is one unit short of payable and fires a wave over the seed.
+local USABLE_FLUID_CAPACITY = config.FLUID_WAGON_CAPACITY - SEED_AMOUNT
+
 -- A train stopped at an east facing stop lines its leading edge up with the stop
 -- marker, so the leading stock centre sits half a stock length west of it.
 local STOP_FRONT_OFFSET = 3
@@ -72,10 +85,12 @@ local function ensure_state()
   taxes.train = taxes.train or {}
   taxes.train.loco_unit_numbers = taxes.train.loco_unit_numbers or {}
   taxes.train.wagon_unit_numbers = taxes.train.wagon_unit_numbers or {}
-  -- departing is this module's own field and postdates the first saves, so a
-  -- load from an older revision arrives without it. Normalising it here is what
-  -- lets every read treat it as a plain boolean.
+  -- departing and fluid_seeds are this module's own fields and postdate the
+  -- first saves, so a load from an older revision arrives without them.
+  -- Normalising them here is what lets every read treat them as a plain boolean
+  -- and a plain table.
   if taxes.train.departing == nil then taxes.train.departing = false end
+  taxes.train.fluid_seeds = taxes.train.fluid_seeds or {}
   return taxes
 end
 
@@ -274,8 +289,11 @@ local function fluid_wagon_names(demand, limit)
     if is_fluid_entry(entry) then
       local count = tonumber(entry.count) or 0
       -- A fluid wagon cannot mix two fluids, so every distinct fluid entry
-      -- claims a wagon of its own before capacity is considered at all.
-      local needed = math.max(1, math.ceil(count / config.FLUID_WAGON_CAPACITY))
+      -- claims a wagon of its own before capacity is considered at all. What is
+      -- left of a wagon once it is seeded is what the player can deliver into
+      -- it, so a demand of exactly four wagonloads gets a fifth wagon rather
+      -- than being one unit short of payable.
+      local needed = math.max(1, math.ceil(count / USABLE_FLUID_CAPACITY))
       for _ = 1, needed do
         if limit and #names >= limit then return names end
         names[#names + 1] = entry.name
@@ -550,39 +568,66 @@ local function protect(entity, operable)
   end
 end
 
---- Bind a fluid wagon to one fluid at the engine level, so the wrong fluid is
---- refused outright rather than merely going unaccounted for. Every tank of the
---- wagon is filtered, because the prototype is free to declare more than one.
--- @return boolean whether the engine accepted the filter
-local function set_fluid_filter(wagon, name)
-  local ok, applied = pcall(function()
-    local box = wagon.fluidbox
-    local count = 0
-    for index = 1, #box do
-      if box.set_filter(index, { name = name }) then count = count + 1 end
-    end
-    return count
+--- Bind a fluid wagon to one fluid at the engine level by seeding it with a
+--- trace of that fluid. A fluid wagon exposes no fluidbox to filter, but the
+--- engine will not put a second fluid in beside the first, so the seed is the
+--- binding: measured on 2.0.77, a wagon holding one unit of light oil rejects
+--- 5000 heavy oil outright and still accepts light oil up to capacity.
+-- @return number how much was actually seeded, 0 if the wagon refused it
+local function seed_fluid_wagon(wagon, name)
+  local ok, accepted = pcall(function()
+    return wagon.insert_fluid({ name = name, amount = SEED_AMOUNT })
   end)
-  if ok and type(applied) == "number" and applied > 0 then return true end
+  if ok and type(accepted) == "number" and accepted > 0 then return accepted end
 
-  log("[taxes] could not filter a fluid wagon to " .. tostring(name)
-    .. "; insert() still honours the assignment but the engine will not enforce it")
-  return false
+  -- An unseeded wagon is simply the old, unbound behaviour. That is a worse
+  -- cycle, not a broken one, so it is never a reason to abandon the train.
+  log("[taxes] could not seed a fluid wagon with " .. tostring(name)
+    .. "; it stays unbound and the wrong fluid can still be pumped into it")
+  return 0
 end
 
---- Filter the wagons so the tax can only be paid in the demanded currency:
---- every cargo slot to a demanded item, and every fluid wagon to exactly one
---- demanded fluid. Each call is guarded on its own so one bad prototype name
---- cannot leave the rest of the train wide open.
+--- The seed recorded against a wagon, as { name, amount }, or nil. Recorded per
+--- wagon rather than assumed, so a wagon whose seeding failed is not credited
+--- with a unit it never received.
+local function seed_record(wagon)
+  local taxes = storage.taxes
+  local seeds = taxes and taxes.train and taxes.train.fluid_seeds
+  if type(seeds) ~= "table" then return nil end
+
+  local got, unit_number = pcall(function() return wagon.unit_number end)
+  if not (got and unit_number) then return nil end
+
+  local seed = seeds[unit_number]
+  if type(seed) ~= "table" then return nil end
+  return seed
+end
+
+--- How much of `name` in this wagon is the scenario's own seed rather than
+--- something the player delivered. Everything that reads or removes fluid goes
+--- through this, so contents(), settle() and insert() cannot disagree about it.
+local function seed_in(wagon, name)
+  local seed = seed_record(wagon)
+  if not (seed and seed.name == name) then return 0 end
+  return tonumber(seed.amount) or 0
+end
+
+--- Bind the wagons so the tax can only be paid in the demanded currency: every
+--- cargo slot filtered to a demanded item, and every fluid wagon seeded with
+--- exactly one demanded fluid. Each call is guarded on its own so one bad
+--- prototype name cannot leave the rest of the train wide open.
 ---
 --- The fluid half matters as much as the cargo half. A late game demand
 --- routinely names two fluids - light oil, heavy oil and lubricant are all tier
---- 6 - and with no filter a player who pumps the first fluid into every wagon
---- makes the second physically undeliverable and is punished for it.
+--- 6 - and with nothing binding the wagons a player who pumps the first fluid
+--- into every one makes the second physically undeliverable and is punished for
+--- it through no fault of their own.
+-- @return table the seeds actually placed, as [unit_number] = { name, amount }
 local function apply_filters(wagons, filters, fluid_filters)
   filters = type(filters) == "table" and filters or {}
   fluid_filters = type(fluid_filters) == "table" and fluid_filters or {}
 
+  local seeds = {}
   local cursor, fluid_index = 1, 0
   for _, wagon in ipairs(wagons) do
     if wagon.valid and wagon.name == "cargo-wagon" and #filters > 0 then
@@ -604,9 +649,17 @@ local function apply_filters(wagons, filters, fluid_filters)
       -- the nth name of the assignment fluid_wagon_names() built.
       fluid_index = fluid_index + 1
       local name = fluid_filters[fluid_index]
-      if name then set_fluid_filter(wagon, name) end
+      if name then
+        local seeded = seed_fluid_wagon(wagon, name)
+        local got, unit_number = pcall(function() return wagon.unit_number end)
+        if seeded > 0 and got and unit_number then
+          seeds[unit_number] = { name = name, amount = seeded }
+        end
+      end
     end
   end
+
+  return seeds
 end
 
 --- Point a train at the tax station and hand it back to the automatic driver.
@@ -647,7 +700,10 @@ local function commission(taxes, comp, created, train)
     end
   end
 
-  apply_filters(wagons, comp.filters, comp.fluid_filters)
+  -- The seeds have to be recorded before anything reads the wagons back, so
+  -- contents(), settle() and insert() all know which unit of fluid is ours.
+  taxes.train.fluid_seeds = apply_filters(wagons, comp.filters, comp.fluid_filters)
+  local fluid_seeds = taxes.train.fluid_seeds
 
   if not (train and train.valid) then train = coupled_train(created) end
   set_station_schedule(train)
@@ -673,6 +729,7 @@ local function commission(taxes, comp, created, train)
       wagon_unit_numbers = {},
       train_id = nil,
       departing = false,
+      fluid_seeds = {},
     }
     cache.locos, cache.wagons, cache.scanned_tick = {}, {}, nil
     return nil
@@ -690,6 +747,9 @@ local function commission(taxes, comp, created, train)
     -- Module private: set once depart() has released the train eastwards, so
     -- check_despawn knows a hand pushed train still needs nudging.
     departing = false,
+    -- Module private: the trace of fluid each fluid wagon was bound with, so
+    -- the scenario's own seed is never mistaken for a player's delivery.
+    fluid_seeds = fluid_seeds,
   }
   cache.locos, cache.wagons, cache.scanned_tick = locos, wagons, game.tick
 
@@ -966,7 +1026,12 @@ function train_manager.contents()
         if ok and type(fluids) == "table" then
           for name, amount in pairs(fluids) do
             if type(name) == "string" and type(amount) == "number" then
-              result[name] = (result[name] or 0) + amount
+              -- The seed that binds the wagon to this fluid is the scenario's
+              -- own and was never delivered by anybody, so it is not reported.
+              -- Otherwise the progress bar would start at one unit filled and a
+              -- one unit demand would read as paid before anyone touched it.
+              local delivered = amount - seed_in(wagon, name)
+              if delivered > 0 then result[name] = (result[name] or 0) + delivered end
             end
           end
         end
@@ -1021,22 +1086,14 @@ local function fluid_level(wagon)
   return total
 end
 
---- Which fluid a wagon is bound to: the fluidbox filter commissioning set if the
---- engine took one, otherwise whatever it already holds, otherwise nil for a
---- wagon nothing has claimed yet.
+--- Which fluid a wagon is bound to: the fluid it was seeded with, otherwise
+--- whatever it already holds, otherwise nil for a wagon nothing has claimed.
 local function wagon_fluid(wagon)
-  local ok, filtered = pcall(function()
-    local box = wagon.fluidbox
-    for index = 1, #box do
-      local filter = box.get_filter(index)
-      if filter and type(filter.name) == "string" then return filter.name end
-    end
-    return nil
-  end)
-  if ok and type(filtered) == "string" then return filtered end
+  local seed = seed_record(wagon)
+  if seed and type(seed.name) == "string" then return seed.name end
 
-  -- A wagon with fluid in it and no readable filter is still spoken for: it
-  -- physically cannot take a second fluid.
+  -- A wagon with fluid in it and no recorded seed is still spoken for: the
+  -- engine will not let a second fluid in beside the first.
   local held_ok, fluids = pcall(function() return wagon.get_fluid_contents() end)
   if held_ok and type(fluids) == "table" then
     for held in pairs(fluids) do
@@ -1046,19 +1103,19 @@ local function wagon_fluid(wagon)
   return nil
 end
 
---- The wagons a fluid may be put into, following the same assignment the
---- fluidbox filters were built from, so a fluid can never spill into the wagon
---- the next demand entry is relying on.
+--- The wagons a fluid may be put into, following the same assignment the seeds
+--- were placed from, so a fluid can never spill into the wagon the next demand
+--- entry is relying on.
 local function wagons_for_fluid(wagons, demand, name)
   local fluid_wagons = fluid_wagons_of(wagons)
   local assignment = fluid_wagon_names(demand, #fluid_wagons)
 
   local targets, unassigned = {}, {}
   for index, wagon in ipairs(fluid_wagons) do
-    -- The wagon's own filter outranks the assignment recomputed from the
-    -- demand: a train trimmed to fit the line carries fewer wagons than the
-    -- demand asked for, and the engine filter is what actually decides what
-    -- the wagon will take.
+    -- What the wagon was actually seeded with outranks the assignment
+    -- recomputed from the demand: a train trimmed to fit the line carries fewer
+    -- wagons than the demand asked for, and the seed is what the engine will
+    -- actually enforce.
     local bound = wagon_fluid(wagon) or assignment[index]
     if bound == name then
       targets[#targets + 1] = wagon
@@ -1078,15 +1135,26 @@ end
 --- names the fluid it takes, so a wagon assigned elsewhere can only ever give
 --- back what belongs to this entry anyway, and a fluid that somehow ended up in
 --- the wrong wagon still counts as paid.
+---
+--- The seed each wagon was bound with is left where it is and never counted as
+--- delivered: it is the scenario's own unit, and banking it would let a small
+--- demand settle as paid when the player contributed nothing.
 local function take_fluid(wagons, name, wanted)
   local taken = 0
   for _, wagon in ipairs(wagons) do
     if taken >= wanted then break end
     if wagon.valid and wagon.name == "fluid-wagon" then
-      local ok, removed = pcall(function()
-        return wagon.remove_fluid({ name = name, amount = wanted - taken })
-      end)
-      if ok and type(removed) == "number" then taken = taken + removed end
+      local held = 0
+      local got, amount = pcall(function() return wagon.get_fluid_count(name) end)
+      if got and type(amount) == "number" then held = amount end
+
+      local available = held - seed_in(wagon, name)
+      if available > 0 then
+        local ok, removed = pcall(function()
+          return wagon.remove_fluid({ name = name, amount = math.min(wanted - taken, available) })
+        end)
+        if ok and type(removed) == "number" then taken = taken + removed end
+      end
     end
   end
   -- Fluid amounts are floats, so a full delivery can read back as 999.9999.
@@ -1117,6 +1185,11 @@ function train_manager.insert(entry, amount)
       -- holding a different fluid, but it has no idea what a previous call
       -- already put in there. Asking for a full wagon's worth regardless is
       -- what let a second /tax-fill push a fluid past its demanded total.
+      --
+      -- The seed counts against the room because it physically occupies it, but
+      -- it is never added to `inserted`: what this returns is only ever what
+      -- insert_fluid accepted from the caller. Composition already reserves the
+      -- seed's unit, so the demand still fits.
       local room = math.min(amount - inserted, config.FLUID_WAGON_CAPACITY - fluid_level(wagon))
       if room > 0 then
         local ok, accepted = pcall(function()
@@ -1424,6 +1497,7 @@ function train_manager.destroy()
     wagon_unit_numbers = {},
     train_id = nil,
     departing = false,
+    fluid_seeds = {},
   }
   cache.locos, cache.wagons, cache.scanned_tick = {}, {}, nil
 

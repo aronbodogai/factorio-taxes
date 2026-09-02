@@ -24,15 +24,15 @@ subagent that runs against the spec and the headless server.
 
 | # | Task | File | Status |
 | --- | --- | --- | --- |
-| 1.1 | Rail line, station, terrain corridor, immutability | `scripts/rail_infra.lua` | REVIEW |
-| 1.2 | Taxable item catalogue, base game only | `scripts/data/taxable_items.lua` | REVIEW |
-| 1.3 | Tech-gated randomised demand generation | `scripts/tax_request.lua` | REVIEW |
-| 1.4 | Train spawn, composition, filters, arrival, departure, settlement | `scripts/train_manager.lua` | REVIEW |
+| 1.1 | Rail line, station, terrain corridor, immutability | `scripts/rail_infra.lua` | DONE |
+| 1.2 | Taxable item catalogue, base game only | `scripts/data/taxable_items.lua` | DONE |
+| 1.3 | Tech-gated randomised demand generation | `scripts/tax_request.lua` | DONE |
+| 1.4 | Train spawn, composition, filters, arrival, departure, settlement | `scripts/train_manager.lua` | DONE |
 | 1.5 | Proportional biter punishment waves | `scripts/punishment.lua` | DONE |
 | 1.6 | Player-facing UI and locale strings | `scripts/gui.lua` | DONE |
-| 1.7 | Cycle state machine tying the modules together | `scripts/tax_schedule.lua` | REVIEW |
-| 1.8 | Scenario entry point and event wiring | `control.lua`, `scripts/taxes.lua` | REVIEW |
-| 1.9 | Debug commands so every stage can be driven by hand | `scripts/commands.lua` | REVIEW |
+| 1.7 | Cycle state machine tying the modules together | `scripts/tax_schedule.lua` | DONE |
+| 1.8 | Scenario entry point and event wiring | `control.lua`, `scripts/taxes.lua` | DONE |
+| 1.9 | Debug commands so every stage can be driven by hand | `scripts/commands.lua` | DONE |
 
 ## Phase 2 — Verification
 

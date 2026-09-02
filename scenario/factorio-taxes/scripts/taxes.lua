@@ -32,6 +32,7 @@ local function default_state()
       wagon_unit_numbers = {},
       train_id = nil,
       departing = false,
+      fluid_seeds = {},
     },
     stats = { paid = 0, missed = 0, waves = 0, last_shortfall = 0 },
   }

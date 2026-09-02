@@ -63,6 +63,7 @@ storage.taxes = {
     wagon_unit_numbers = {},    -- cargo and fluid wagons, in order
     train_id           = nil,   -- LuaTrain.id, refreshed if a split changes it
     departing          = false, -- set while a hand-pushed train still needs nudging
+    fluid_seeds        = {},    -- [unit_number] = { name, amount } trace that locks a fluid wagon
   },
   stats = { paid = 0, missed = 0, waves = 0, last_shortfall = 0 },
 }

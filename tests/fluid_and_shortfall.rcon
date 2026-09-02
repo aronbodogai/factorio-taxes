@@ -12,7 +12,7 @@
 /tax-arrive
 /silent-command local s=game.surfaces.nauvis; rcon.print("PROBE stock cargo="..#s.find_entities_filtered{name="cargo-wagon"}.." fluid="..#s.find_entities_filtered{name="fluid-wagon"})
 /silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}[1]; rcon.print(fw and "OK fluid-wagon-present" or "FAIL no-fluid-wagon-for-fluid-demand")
-/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}[1]; local f=fw and fw.fluidbox and fw.fluidbox.get_filter(1); rcon.print((f and f.name=="water") and "OK fluid-wagon-filtered-to-water" or ("FAIL fluid-filter="..tostring(f and f.name)))
+/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}[1]; local seeded=fw and fw.get_fluid_count("water") or 0; rcon.print((seeded>0 and seeded<=1) and ("OK fluid-wagon-seeded-with-water="..seeded) or ("FAIL seed="..seeded))
 # Pay the fluid in full, pay nothing of the item.
 /silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}[1]; fw.insert_fluid{name="water",amount=25000}; rcon.print("PROBE water-loaded="..math.floor(fw.get_fluid_count("water")))
 /silent-command local s=game.surfaces.nauvis; local c=0; for _,w in pairs(s.find_entities_filtered{name="cargo-wagon"}) do local inv=w.get_inventory(defines.inventory.cargo_wagon); for i=1,#inv do local st=inv[i]; if st.valid_for_read then c=c+st.count end end end; rcon.print(c==0 and "OK item-side-unpaid" or ("FAIL item-side-has="..c))
@@ -26,10 +26,10 @@
 /tax-train
 /tax-arrive
 /silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}; rcon.print(#fw>=2 and ("OK two-fluid-wagons="..#fw) or ("FAIL fluid-wagons="..#fw.." for two fluids"))
-/silent-command local s=game.surfaces.nauvis; local seen={}; for _,w in pairs(s.find_entities_filtered{name="fluid-wagon"}) do local f=w.fluidbox and w.fluidbox.get_filter(1); if f then seen[f.name]=(seen[f.name] or 0)+1 end end; local parts={}; for k,v in pairs(seen) do parts[#parts+1]=k.."="..v end; table.sort(parts); rcon.print("PROBE fluid-filters "..table.concat(parts," "))
-/silent-command local s=game.surfaces.nauvis; local seen={}; for _,w in pairs(s.find_entities_filtered{name="fluid-wagon"}) do local f=w.fluidbox and w.fluidbox.get_filter(1); if f then seen[f.name]=true end end; rcon.print((seen["light-oil"] and seen["heavy-oil"]) and "OK both-fluids-have-a-wagon" or "FAIL a-demanded-fluid-has-no-wagon")
+/silent-command local s=game.surfaces.nauvis; local seen={}; for _,w in pairs(s.find_entities_filtered{name="fluid-wagon"}) do for _,n in pairs({"light-oil","heavy-oil"}) do if w.get_fluid_count(n)>0 then seen[n]=(seen[n] or 0)+1 end end end; local parts={}; for k,v in pairs(seen) do parts[#parts+1]=k.."="..v end; table.sort(parts); rcon.print("PROBE seeded-wagons "..table.concat(parts," "))
+/silent-command local s=game.surfaces.nauvis; local seen={}; for _,w in pairs(s.find_entities_filtered{name="fluid-wagon"}) do for _,n in pairs({"light-oil","heavy-oil"}) do if w.get_fluid_count(n)>0 then seen[n]=true end end end; rcon.print((seen["light-oil"] and seen["heavy-oil"]) and "OK both-fluids-bound-to-a-wagon" or "FAIL a-demanded-fluid-has-no-wagon")
 # The engine must refuse the wrong fluid in a filtered wagon.
-/silent-command local s=game.surfaces.nauvis; local w; for _,c in pairs(s.find_entities_filtered{name="fluid-wagon"}) do local f=c.fluidbox and c.fluidbox.get_filter(1); if f and f.name=="light-oil" then w=c end end; if w then w.insert_fluid{name="heavy-oil",amount=5000} end; rcon.print((w and math.floor(w.get_fluid_count("heavy-oil"))==0) and "OK wrong-fluid-rejected" or ("FAIL wrong-fluid-accepted="..tostring(w and w.get_fluid_count("heavy-oil"))))
+/silent-command local s=game.surfaces.nauvis; local w; for _,c in pairs(s.find_entities_filtered{name="fluid-wagon"}) do if c.get_fluid_count("light-oil")>0 then w=c end end; if w then w.insert_fluid{name="heavy-oil",amount=5000} end; rcon.print((w and math.floor(w.get_fluid_count("heavy-oil"))==0) and "OK wrong-fluid-rejected" or ("FAIL wrong-fluid-accepted="..tostring(w and w.get_fluid_count("heavy-oil"))))
 
 # --- Settling twice must not double-count ------------------------------------
 /silent-command storage.taxes.demand={{kind="item",name="iron-plate",count=50,delivered=0}}; storage.taxes.settled_cycle=nil; rcon.print("PROBE demand-reset")
