@@ -1,0 +1,10 @@
+# Bootstrap smoke test. Every assertion prints either OK or a line starting with
+# FAIL, which the harness greps for.
+/silent-command rcon.print("PROBE base=" .. tostring(script.active_mods["base"]))
+/silent-command rcon.print((not script.active_mods["space-age"] and not script.active_mods["quality"] and not script.active_mods["elevated-rails"]) and "OK vanilla-only" or "FAIL dlc-active")
+/silent-command rcon.print(storage.taxes and "OK state-exists" or "FAIL state-missing")
+/silent-command rcon.print(storage.taxes.phase == "cooldown" and "OK phase-cooldown" or ("FAIL phase=" .. tostring(storage.taxes.phase)))
+/silent-command rcon.print(game.surfaces["nauvis"] and "OK surface-nauvis" or "FAIL surface-missing")
+/silent-command rcon.print(prototypes.entity["straight-rail"] and "OK proto-straight-rail" or "FAIL proto-straight-rail")
+/silent-command rcon.print(prototypes.entity["cargo-wagon"] and "OK proto-cargo-wagon" or "FAIL proto-cargo-wagon")
+/silent-command rcon.print("PROBE tick=" .. game.tick)
