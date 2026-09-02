@@ -8,3 +8,4 @@
 /silent-command rcon.print(prototypes.entity["straight-rail"] and "OK proto-straight-rail" or "FAIL proto-straight-rail")
 /silent-command rcon.print(prototypes.entity["cargo-wagon"] and "OK proto-cargo-wagon" or "FAIL proto-cargo-wagon")
 /silent-command rcon.print("PROBE tick=" .. game.tick)
+/tax-selftest

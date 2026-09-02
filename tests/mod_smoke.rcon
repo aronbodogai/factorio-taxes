@@ -1,0 +1,18 @@
+# The mod form must load and behave identically to the scenario.
+#
+# Assertions go through /tax-selftest rather than /silent-command, because a mod
+# has its own storage which the level script cannot see; introspecting
+# storage.taxes from /silent-command would always report it missing.
+/silent-command rcon.print(script.active_mods["factorio-taxes"] and ("OK mod-loaded="..script.active_mods["factorio-taxes"]) or "FAIL mod-not-loaded")
+/silent-command rcon.print((not script.active_mods["space-age"] and not script.active_mods["quality"] and not script.active_mods["elevated-rails"]) and "OK vanilla-only" or "FAIL dlc-active")
+/silent-command local s=game.surfaces.nauvis; local n=#s.find_entities_filtered{name="straight-rail"}; rcon.print(n>=120 and ("OK rails-on-map="..n) or ("FAIL rails="..n))
+/silent-command local s=game.surfaces.nauvis; local st=s.find_entities_filtered{name="train-stop"}[1]; rcon.print((st and st.backer_name=="Tax Station" and st.minable==false) and "OK station-on-map-and-immutable" or "FAIL station")
+/tax-selftest
+/tax-cycle 5
+/tax-demand 5
+/tax-train
+/tax-arrive
+/tax-fill 1
+/tax-settle
+/tax-selftest
+/tax-status

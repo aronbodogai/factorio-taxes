@@ -106,3 +106,22 @@ tools/reload_test.sh tests/before_reload.rcon tests/after_reload.rcon
 The harness boots the server with an explicit mod list that disables the DLC
 shipped alongside the headless install, so the scenario is always exercised
 against the base game only.
+
+## Running it as a mod instead
+
+The same code ships either way. `tools/build_mod.sh` assembles the mod form from
+the scenario sources, so the scenario stays the single source of truth:
+
+```bash
+tools/build_mod.sh          # produces build/factorio-taxes_0.1.0.zip
+```
+
+Drop that zip in your `mods` directory and it applies to an ordinary freeplay
+save. The only file that differs is `control.lua`: the scenario has to load base
+freeplay itself, because a scenario replaces it, whereas a mod runs alongside
+whatever scenario is already active.
+
+`/tax-selftest` asserts the wiring in either form. Note that `/silent-command`
+cannot see a mod's `storage`, since the level script and the mod have separate
+state, so use `/tax-selftest` rather than poking at `storage.taxes` when testing
+the mod.

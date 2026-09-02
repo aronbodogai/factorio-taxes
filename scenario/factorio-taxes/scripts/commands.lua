@@ -220,6 +220,36 @@ local definitions = {
     end,
   },
   {
+    name = "tax-selftest",
+    help = "Assert the scenario is wired up correctly. Prints one OK or FAIL line per check.",
+    handler = function(command)
+      local surface = util.surface()
+      local station = rail_infra.station()
+      local rails = surface and surface.count_entities_filtered({ name = "straight-rail" }) or 0
+      local demand = tax_request.generate(storage.taxes.cycle)
+      local composition = demand and train_manager.compose(demand)
+
+      -- Run from inside the scenario rather than from /silent-command, because a
+      -- mod has its own storage that the level script cannot see. This is the
+      -- only way the same assertions can cover both the scenario and the mod.
+      local checks = {
+        { storage.taxes ~= nil, "state-exists" },
+        { storage.taxes.infra.built == true, "infrastructure-built" },
+        { rails >= 100, "rails=" .. rails },
+        { station ~= nil and station.valid, "station-valid" },
+        { station ~= nil and station.minable == false, "station-immutable" },
+        { demand ~= nil and #demand > 0, "demand-generates" },
+        { composition ~= nil and (composition.wagons or 0) >= 1, "train-composes" },
+        { punishment.wave_size(1, 0) >= 0, "wave-size-pure" },
+        { rail_infra.west_end() ~= nil and rail_infra.east_end() ~= nil, "line-ends-known" },
+      }
+
+      for _, check in pairs(checks) do
+        respond(command, (check[1] and "OK " or "FAIL ") .. check[2])
+      end
+    end,
+  },
+  {
     name = "tax-skip",
     help = "Expire the current phase immediately so the next transition happens next tick.",
     handler = function(command)

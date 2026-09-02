@@ -33,6 +33,7 @@ subagent that runs against the spec and the headless server.
 | 1.7 | Cycle state machine tying the modules together | `scripts/tax_schedule.lua` | DONE |
 | 1.8 | Scenario entry point and event wiring | `control.lua`, `scripts/taxes.lua` | DONE |
 | 1.9 | Debug commands so every stage can be driven by hand | `scripts/commands.lua` | DONE |
+| 1.10 | Mod wrapper built from the scenario sources | `tools/build_mod.sh` | DONE |
 
 ## Phase 2 — Verification
 
@@ -52,7 +53,7 @@ subagent that runs against the spec and the headless server.
 | # | Task | Status |
 | --- | --- | --- |
 | 3.1 | Balance pass on growth rates and wave sizes | DONE |
-| 3.2 | Optional mod wrapper so the scenario can ship as a mod | TODO |
+| 3.2 | Optional mod wrapper so the scenario can ship as a mod | DONE |
 | 3.3 | Player-facing README with install instructions | DONE |
 
 ## Notes

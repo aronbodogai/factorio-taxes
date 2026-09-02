@@ -5,3 +5,4 @@ saves/
 temp/
 .factorio-server/
 node_modules/
+build/
