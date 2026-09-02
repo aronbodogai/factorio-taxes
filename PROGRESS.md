@@ -27,7 +27,7 @@ subagent that runs against the spec and the headless server.
 | 1.1 | Rail line, station, terrain corridor, immutability | `scripts/rail_infra.lua` | REVIEW |
 | 1.2 | Taxable item catalogue, base game only | `scripts/data/taxable_items.lua` | REVIEW |
 | 1.3 | Tech-gated randomised demand generation | `scripts/tax_request.lua` | REVIEW |
-| 1.4 | Train spawn, composition, filters, arrival, departure, settlement | `scripts/train_manager.lua` | TODO |
+| 1.4 | Train spawn, composition, filters, arrival, departure, settlement | `scripts/train_manager.lua` | REVIEW |
 | 1.5 | Proportional biter punishment waves | `scripts/punishment.lua` | REVIEW |
 | 1.6 | Player-facing UI and locale strings | `scripts/gui.lua` | REVIEW |
 | 1.7 | Cycle state machine tying the modules together | `scripts/tax_schedule.lua` | REVIEW |
@@ -38,12 +38,12 @@ subagent that runs against the spec and the headless server.
 
 | # | Task | Status |
 | --- | --- | --- |
-| 2.1 | Scenario loads headless with no Lua error | TODO |
-| 2.2 | Rail, station, and corridor exist and are indestructible at tick 0 | TODO |
-| 2.3 | A full cycle runs end to end under accelerated timings | TODO |
+| 2.1 | Scenario loads headless with no Lua error | DONE |
+| 2.2 | Rail, station, and corridor exist and are indestructible at tick 0 | DONE |
+| 2.3 | A full cycle runs end to end under accelerated timings | DONE |
 | 2.4 | Demand tracks the researched tech tree, biased to higher tiers | TODO |
-| 2.5 | Underpayment spawns a wave proportional to the shortfall | TODO |
-| 2.6 | Wagon filters match the demand exactly | TODO |
+| 2.5 | Underpayment spawns a wave proportional to the shortfall | DONE |
+| 2.6 | Wagon filters match the demand exactly | DONE |
 | 2.7 | Player cannot mine, deconstruct, damage, or drive tax infrastructure | TODO |
 | 2.8 | Save, reload, and resume mid-cycle without desync or error | TODO |
 
