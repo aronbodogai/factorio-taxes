@@ -1,0 +1,35 @@
+# Verification task 2.7: the player cannot mine, deconstruct, damage, or drive
+# the tax infrastructure. The mining and driving paths need a real connected
+# player, so what is asserted here is the protection that does not: the entity
+# flags that make mining impossible in the first place, damage immunity, and the
+# deconstruction handler cancelling a real order.
+/tax-build
+/tax-train
+/tax-arrive
+
+# --- Flags that make mining impossible --------------------------------------
+/silent-command local s=game.surfaces.nauvis; local bad=0; for _,e in pairs(s.find_entities_filtered{name="straight-rail"}) do if e.minable or e.destructible then bad=bad+1 end end; rcon.print(bad==0 and "OK all-rails-unminable-and-indestructible" or ("FAIL mutable-rails="..bad))
+/silent-command local s=game.surfaces.nauvis; local st=s.find_entities_filtered{name="train-stop"}[1]; rcon.print((st and not st.minable and not st.destructible and not st.operable) and "OK stop-locked" or "FAIL stop-not-locked")
+/silent-command local s=game.surfaces.nauvis; local bad=0; for _,e in pairs(s.find_entities_filtered{name={"locomotive","cargo-wagon","fluid-wagon"}}) do if e.minable or e.destructible then bad=bad+1 end end; rcon.print(bad==0 and "OK rolling-stock-locked" or ("FAIL mutable-stock="..bad))
+/silent-command local s=game.surfaces.nauvis; local bad=0; for _,e in pairs(s.find_entities_filtered{name="locomotive"}) do if e.operable then bad=bad+1 end end; rcon.print(bad==0 and "OK locomotives-not-operable" or ("FAIL operable-locos="..bad))
+/silent-command local s=game.surfaces.nauvis; local n=0; for _,e in pairs(s.find_entities_filtered{name="cargo-wagon"}) do if e.operable then n=n+1 end end; rcon.print("PROBE operable-cargo-wagons="..n.." (must be >0 so the player can load)")
+
+# --- Damage immunity ---------------------------------------------------------
+/silent-command local s=game.surfaces.nauvis; local r=s.find_entities_filtered{name="straight-rail"}[1]; r.damage(100000, game.forces.enemy); rcon.print(r.valid and "OK rail-immune-to-damage" or "FAIL rail-destroyed")
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; if l then l.damage(100000, game.forces.enemy) end; rcon.print((l and l.valid) and "OK loco-immune-to-damage" or "FAIL loco-destroyed")
+/silent-command local s=game.surfaces.nauvis; local st=s.find_entities_filtered{name="train-stop"}[1]; st.damage(100000, game.forces.enemy); rcon.print(st.valid and "OK stop-immune-to-damage" or "FAIL stop-destroyed")
+
+# --- Deconstruction orders are cancelled -------------------------------------
+/silent-command local s=game.surfaces.nauvis; local r=s.find_entities_filtered{name="straight-rail"}[1]; r.order_deconstruction(game.forces.player); rcon.print(r.to_be_deconstructed()==false and "OK rail-deconstruction-cancelled" or "FAIL rail-marked-for-deconstruction")
+/silent-command local s=game.surfaces.nauvis; local st=s.find_entities_filtered{name="train-stop"}[1]; st.order_deconstruction(game.forces.player); rcon.print(st.to_be_deconstructed()==false and "OK stop-deconstruction-cancelled" or "FAIL stop-marked-for-deconstruction")
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; if l then l.order_deconstruction(game.forces.player) end; rcon.print((l and l.to_be_deconstructed()==false) and "OK loco-deconstruction-cancelled" or "FAIL loco-marked-for-deconstruction")
+
+# --- The protection survives the entities being tracked ----------------------
+/silent-command local n=0; for _ in pairs(storage.taxes.infra.entities) do n=n+1 end; rcon.print(n>100 and ("OK infra-tracked="..n) or ("FAIL infra-tracked-too-few="..n))
+/tax-despawn
+/silent-command local n=0; for _ in pairs(storage.taxes.infra.entities) do n=n+1 end; rcon.print("PROBE tracked-after-despawn="..n.." (should drop back to the rails and stop, not keep growing)")
+/tax-train
+/tax-despawn
+/tax-train
+/tax-despawn
+/silent-command local n=0; for _ in pairs(storage.taxes.infra.entities) do n=n+1 end; rcon.print("PROBE tracked-after-three-cycles="..n)

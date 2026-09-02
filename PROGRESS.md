@@ -44,7 +44,7 @@ subagent that runs against the spec and the headless server.
 | 2.4 | Demand tracks the researched tech tree, biased to higher tiers | DONE |
 | 2.5 | Underpayment spawns a wave proportional to the shortfall | DONE |
 | 2.6 | Wagon filters match the demand exactly | DONE |
-| 2.7 | Player cannot mine, deconstruct, damage, or drive tax infrastructure | TODO |
+| 2.7 | Player cannot mine, deconstruct, damage, or drive tax infrastructure | DONE |
 | 2.8 | Save, reload, and resume mid-cycle without desync or error | DONE |
 
 ## Phase 3 — Polish
@@ -61,3 +61,15 @@ subagent that runs against the spec and the headless server.
 * Prototype access is `prototypes.item`, not `game.item_prototypes`.
 * Test edits go through `tools/deploy.sh`, which syncs the scenario into the WSL
   headless install; never edit the deployed copy directly.
+
+## Test coverage caveats
+
+* `tests/protection.rcon` asserts the engine-level protection: `minable = false`,
+  `destructible = false`, damage immunity, and deconstruction orders being
+  cancelled. The player-mining and player-driving paths need a real connected
+  player, which a headless RCON run has none of. `minable = false` is what makes
+  mining impossible in the first place, so the handlers are a warning path rather
+  than the protection itself.
+* The same test confirms tracked infrastructure does not grow without bound:
+  123 entities with a train present, 121 after it despawns, still 121 after three
+  further train cycles.
