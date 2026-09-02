@@ -74,6 +74,7 @@ see any particular stage. They work in game and over RCON.
 | `/tax-cycle <n>` | Set the cycle counter to test escalation |
 | `/tax-phase <name> [seconds]` | Jump to a phase |
 | `/tax-skip` | Expire the current phase immediately |
+| `/tax-selftest` | Assert the wiring; works in both scenario and mod form |
 
 A quick end-to-end check, by hand:
 
