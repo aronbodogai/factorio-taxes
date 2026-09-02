@@ -28,7 +28,7 @@ subagent that runs against the spec and the headless server.
 | 1.2 | Taxable item catalogue, base game only | `scripts/data/taxable_items.lua` | TODO |
 | 1.3 | Tech-gated randomised demand generation | `scripts/tax_request.lua` | TODO |
 | 1.4 | Train spawn, composition, filters, arrival, departure, settlement | `scripts/train_manager.lua` | TODO |
-| 1.5 | Proportional biter punishment waves | `scripts/punishment.lua` | TODO |
+| 1.5 | Proportional biter punishment waves | `scripts/punishment.lua` | REVIEW |
 | 1.6 | Player-facing UI and locale strings | `scripts/gui.lua` | TODO |
 | 1.7 | Cycle state machine tying the modules together | `scripts/tax_schedule.lua` | REVIEW |
 | 1.8 | Scenario entry point and event wiring | `control.lua`, `scripts/taxes.lua` | REVIEW |
