@@ -14,6 +14,7 @@ BIN="$SERVER/bin/x64/factorio"
 RCON_PORT="${RCON_PORT:-27015}"
 RCON_PASSWORD="${RCON_PASSWORD:-taxes}"
 RUN_DIR="${RUN_DIR:-$HOME/factorio-taxes-server/run}"
+SCENARIO="${SCENARIO:-factorio-taxes}"
 COMMAND_FILE="${1:-}"
 
 if [ -z "$COMMAND_FILE" ]; then
@@ -63,7 +64,7 @@ LOG="$RUN_DIR/server.log"
 OUT="$RUN_DIR/rcon.out"
 rm -f "$LOG" "$OUT"
 
-"$BIN" --start-server-load-scenario factorio-taxes \
+"$BIN" --start-server-load-scenario "$SCENARIO" \
        --server-settings "$SETTINGS" \
        --mod-directory "$MODS_DIR" \
        --rcon-port "$RCON_PORT" \

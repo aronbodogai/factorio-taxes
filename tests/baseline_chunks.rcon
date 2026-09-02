@@ -1,0 +1,1 @@
+/silent-command local n=0; for c in game.surfaces.nauvis.get_chunks() do n=n+1 end; rcon.print("PROBE baseline-chunks="..n)

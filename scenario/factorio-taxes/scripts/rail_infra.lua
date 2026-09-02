@@ -3,8 +3,9 @@
 --
 -- The construction pass is deliberately re-runnable: every placement first looks
 -- for an entity that is already there, so building twice repairs rather than
--- duplicates. build() does the whole pass; ensure() is the cheap post-load
--- check that only falls back to build() when something is actually missing.
+-- duplicates. build() does the whole pass; ensure() is the cheap check that
+-- verifies what actually exists on the surface rather than trusting a flag, and
+-- only falls back to build() when the line itself is damaged.
 
 local config = require("scripts.config")
 local util = require("scripts.util")
@@ -22,6 +23,11 @@ local STOP_OFFSET = 2
 -- the points stay on the odd grid the rails use. The train is assembled
 -- eastwards from west_end, so a couple of tiles of margin is enough.
 local END_INSET = 4
+
+-- Tiles per chunk edge, and the margin in CHUNKS we ask for around each chunk of
+-- the corridor. See generate_corridor_chunks for why this is not a tile count.
+local CHUNK_SIZE = 32
+local CHUNK_MARGIN = 1
 
 -- Only consulted if the collision layer query below is unavailable. These are
 -- the base game tiles a rail cannot be built on.
@@ -62,21 +68,83 @@ local function corridor_area()
   }
 end
 
+--- The thin band the line's own rails sit in. Deliberately much narrower than
+--- the corridor: a rail the player laid alongside at RAIL_Y +/- 2 has a bounding
+--- box that stops a full tile short of this band, so a stray rail cannot pad the
+--- count and mask a gap in our line.
+local function rail_band_area()
+  local first_x, last_x = line_extents()
+  return {
+    { first_x - 1, config.RAIL_Y - 0.5 },
+    { last_x + 1, config.RAIL_Y + 0.5 },
+  }
+end
+
+--- How many rails a complete line has, derived from config rather than from a
+--- number we once stored, so a config change cannot leave a stale expectation.
+local function expected_rail_count()
+  local first_x, last_x = line_extents()
+  return math.floor((last_x - first_x) / 2) + 1
+end
+
+--- How many of the line's rails actually exist right now, or nil if the count
+--- could not be taken. One API call, so this is cheap enough for ensure().
+local function count_line_rails(surface)
+  local ok, count = pcall(function()
+    return surface.count_entities_filtered({ area = rail_band_area(), name = "straight-rail" })
+  end)
+  if not ok then return nil end
+  return count
+end
+
+--- Where the tax station belongs. Factorio serves a stop on the RIGHT-hand side
+--- relative to travel, so for an eastbound train right is +y, which puts the stop
+--- south of the line (docs/API_NOTES.md, docs/DESIGN.md section 4). The odd grid
+--- has no tile centred on x = 0, so -1 is the nearest slot to it.
+local function station_position()
+  return { x = to_odd(0), y = config.RAIL_Y + STOP_OFFSET }
+end
+
 -- Corridor preparation ------------------------------------------------------
 
 --- Force the chunks the line runs through into existence. Only the chunks
 --- around spawn exist when on_init runs, and neither set_tiles nor
 --- create_entity can be trusted on ground the map generator has not produced.
+---
+--- request_to_generate_chunks takes its radius in CHUNKS, not tiles
+--- (docs/API_NOTES.md). An earlier version passed 32 from nine positions and
+--- generated 5645 chunks at map start, which is a slow on_init, a bloated save,
+--- and thousands of chunks of pre-generated enemy nests. The corridor is only a
+--- handful of chunks wide and two tall, so walk its exact chunk span and ask for
+--- a single chunk of margin around each, which keeps the total in the dozens.
+--- ensure() can reach build() again mid-game, so this has to stay cheap.
+-- @return number chunk positions requested
 local function generate_corridor_chunks(surface)
+  local area = corridor_area()
+  local first_cx = math.floor(area[1][1] / CHUNK_SIZE)
+  local last_cx = math.floor(area[2][1] / CHUNK_SIZE)
+  local first_cy = math.floor(area[1][2] / CHUNK_SIZE)
+  local last_cy = math.floor(area[2][2] / CHUNK_SIZE)
+  local requested = 0
+
   local ok, err = pcall(function()
-    for x = -config.RAIL_HALF_LENGTH, config.RAIL_HALF_LENGTH + 31, 32 do
-      surface.request_to_generate_chunks({ x = x, y = config.RAIL_Y }, 32)
+    for cx = first_cx, last_cx do
+      for cy = first_cy, last_cy do
+        surface.request_to_generate_chunks({
+          x = cx * CHUNK_SIZE + CHUNK_SIZE / 2,
+          y = cy * CHUNK_SIZE + CHUNK_SIZE / 2,
+        }, CHUNK_MARGIN)
+        requested = requested + 1
+      end
     end
     surface.force_generate_chunk_requests()
   end)
+
   if not ok then
     log("[taxes] could not force chunk generation for the rail corridor: " .. tostring(err))
+    return 0
   end
+  return requested
 end
 
 --- Build the predicate that decides whether a tile has to be replaced. 2.0
@@ -119,22 +187,44 @@ local function level_corridor(surface)
   return #tiles
 end
 
---- Trees, rocks, and cliffs all block rail. This is the same filter the probe
---- in docs/API_NOTES.md used to clear the corridor completely.
--- @return number entities destroyed
+--- Trees, rocks, and cliffs all block rail, and so do enemy structures. The
+--- ends of the line sit near the edge of the default enemy-free starting area,
+--- so a spawner or a worm can easily stand in the corridor; leaving one there
+--- produces a silent gap in the line that no amount of retrying will fill.
+--- Worms are type "turret" while every player turret is an ammo-, electric- or
+--- fluid-turret, and the force filter keeps player structures safe regardless.
+-- @return number obstacles destroyed, number enemy structures destroyed
 local function clear_corridor(surface)
-  local removed = 0
-  local obstacles = surface.find_entities_filtered({
-    area = corridor_area(),
+  local area = corridor_area()
+  local removed, nests = 0, 0
+
+  for _, entity in pairs(surface.find_entities_filtered({
+    area = area,
     type = { "tree", "simple-entity", "cliff" },
-  })
-  for _, entity in pairs(obstacles) do
+  })) do
     if entity.valid then
       entity.destroy()
       removed = removed + 1
     end
   end
-  return removed
+
+  local ok, err = pcall(function()
+    for _, entity in pairs(surface.find_entities_filtered({
+      area = area,
+      force = "enemy",
+      type = { "unit-spawner", "turret" },
+    })) do
+      if entity.valid then
+        entity.destroy()
+        nests = nests + 1
+      end
+    end
+  end)
+  if not ok then
+    log("[taxes] could not sweep enemy structures out of the rail corridor: " .. tostring(err))
+  end
+
+  return removed, nests
 end
 
 -- Placement -----------------------------------------------------------------
@@ -161,66 +251,95 @@ local function place_rails(surface, force)
       placed = placed + 1
     else
       failed = failed + 1
+      log(string.format("[taxes] no rail could be placed at x = %d, y = %d", x, config.RAIL_Y))
     end
   end
 
   return placed, failed
 end
 
---- Whether a freshly placed stop actually latched onto the line. A stop on the
---- wrong side of the track is placed happily but is connected to nothing, and a
---- train can then never path to it. An unavailable property counts as a pass:
---- we would rather keep the stop the spec asks for than tear down one we cannot
---- judge. Needs verification on the headless server.
+--- Whether a stop actually latched onto the line. A stop on the wrong side of
+--- the track is placed happily but is connected to nothing, and a train can then
+--- never path to it. An unavailable property counts as a pass: we would rather
+--- keep the stop the spec asks for than tear down one we cannot judge.
 local function station_is_connected(stop)
   local ok, rail = pcall(function() return stop.connected_rail end)
   if not ok then return true end
   return rail ~= nil
 end
 
---- Place the tax station. A train stop serves the track that passes on its
---- left, so a stop for eastbound trains sits on the south side of the line,
---- which is +y in Factorio. docs/API_NOTES.md records a probe that put one on
---- the north side, but that probe only asserted that create_entity succeeded,
---- not that a train could reach it, so we place to the south per
---- docs/DESIGN.md section 4 and mirror it only if it fails to connect.
+--- Whether an existing stop is the station we want. All three tests matter: a
+--- stop in the wrong slot, or one facing the wrong way, binds to a rail that
+--- does not exist, and adopting it would make the fault permanent because every
+--- later pass would adopt it again.
+local function station_is_valid(stop)
+  if not (stop and stop.valid) then return false end
+  local expected = station_position()
+  if stop.position.x ~= expected.x or stop.position.y ~= expected.y then return false end
+  if stop.direction ~= defines.direction.east then return false end
+  return station_is_connected(stop)
+end
+
+--- Place the tax station on the south side of the line, facing east.
+---
+--- There is deliberately no mirrored fallback. The right-hand rule is not
+--- ambiguous, and the old fallback mirrored the position to RAIL_Y - 2 while
+--- keeping direction = east, which binds to a rail at RAIL_Y - 4 that does not
+--- exist: a single false negative from connected_rail destroyed the correct stop
+--- and permanently installed an unconnectable one. A fallback that can install a
+--- broken station is worse than no fallback, so a stop that reports no connected
+--- rail is kept and logged loudly instead.
 local function place_station(surface, force)
-  -- The odd grid has no tile centred on x = 0; -1 is the nearest slot to it.
-  local x = to_odd(0)
-  local south_y = config.RAIL_Y + STOP_OFFSET
-  local north_y = config.RAIL_Y - STOP_OFFSET
+  local expected = station_position()
 
-  local stop = surface.find_entity("train-stop", { x = x, y = south_y })
-    or surface.find_entity("train-stop", { x = x, y = north_y })
+  local existing = surface.find_entity("train-stop", expected)
+  if station_is_valid(existing) then
+    existing.backer_name = config.STATION_NAME
+    util.protect(existing, false)
+    return existing
+  end
 
-  if not stop then
-    stop = surface.create_entity({
-      name = "train-stop",
-      position = { x = x, y = south_y },
-      direction = defines.direction.east,
-      force = force,
-    })
-    if stop and not station_is_connected(stop) then
-      stop.destroy()
-      stop = surface.create_entity({
-        name = "train-stop",
-        position = { x = x, y = north_y },
-        direction = defines.direction.east,
-        force = force,
-      })
-      if stop and not station_is_connected(stop) then
-        log("[taxes] the tax station is connected to no rail on either side of the line")
-      end
+  -- Anything else standing in either stop slot is wreckage from an earlier,
+  -- broken placement. Remove it so the correct stop has somewhere to go.
+  for _, y in pairs({ expected.y, config.RAIL_Y - STOP_OFFSET }) do
+    local stale = surface.find_entity("train-stop", { x = expected.x, y = y })
+    if stale and stale.valid then
+      log(string.format("[taxes] removing an unusable tax station at x = %d, y = %d", expected.x, y))
+      util.unprotect(stale)
+      stale.destroy()
     end
   end
 
-  if not stop then return nil end
+  local stop = surface.create_entity({
+    name = "train-stop",
+    position = expected,
+    direction = defines.direction.east,
+    force = force,
+  })
+  if not stop then
+    return nil
+  end
+
+  if not station_is_connected(stop) then
+    log(string.format(
+      "[taxes] WARNING: the tax station at x = %d, y = %d reports no connected rail; look for a gap in the line beside it",
+      expected.x, expected.y))
+  end
 
   stop.backer_name = config.STATION_NAME
   -- operable = false so the player cannot rename the station or edit what
   -- stops there, per docs/DESIGN.md section 4.
   util.protect(stop, false)
   return stop
+end
+
+--- Record a freshly resolved station in state and in the cache.
+local function adopt_station(infra, stop)
+  station_cache = stop
+  infra.stop_unit_number = stop.unit_number
+  -- Store the position the game settled on, not the one we asked for, so
+  -- station() can find the entity again by exact position after a load.
+  infra.stop_position = { x = stop.position.x, y = stop.position.y }
 end
 
 -- Public interface ----------------------------------------------------------
@@ -244,10 +363,11 @@ function rail_infra.build()
 
   local infra = storage.taxes.infra
   infra.surface_index = surface.index
+  infra.built = false
 
-  generate_corridor_chunks(surface)
+  local chunks = generate_corridor_chunks(surface)
   local levelled = level_corridor(surface)
-  local cleared = clear_corridor(surface)
+  local cleared, nests = clear_corridor(surface)
   local placed, failed = place_rails(surface, force)
 
   local stop = place_station(surface, force)
@@ -255,12 +375,7 @@ function rail_infra.build()
     log("[taxes] the tax station could not be placed, the line is unusable")
     return false
   end
-  station_cache = stop
-
-  infra.stop_unit_number = stop.unit_number
-  -- Store the position the game settled on, not the one we asked for, so
-  -- station() can find the entity again by exact position after a load.
-  infra.stop_position = { x = stop.position.x, y = stop.position.y }
+  adopt_station(infra, stop)
 
   local first_x, last_x = line_extents()
   infra.west_end = { x = first_x + END_INSET, y = config.RAIL_Y }
@@ -271,19 +386,65 @@ function rail_infra.build()
     { infra.stop_position.x + config.CHART_RADIUS, infra.stop_position.y + config.CHART_RADIUS },
   })
 
-  infra.built = true
+  -- A line with a hole in it is not a line: no train can path along it, so every
+  -- cycle would burn ARRIVAL_TIMEOUT, teleport the train, and still punish the
+  -- players. Report the failure instead of marking the line built.
+  local usable = failed == 0
+  infra.built = usable
+
   log(string.format(
-    "[taxes] rail line built: %d rails placed, %d failed, %d tiles levelled, %d obstacles cleared",
-    placed, failed, levelled, cleared))
-  return true
+    "[taxes] rail line pass: %d rails placed, %d failed, %d tiles levelled, %d obstacles cleared, %d enemy structures cleared, %d chunk requests",
+    placed, failed, levelled, cleared, nests, chunks))
+  if not usable then
+    log(string.format(
+      "[taxes] WARNING: the tax line has %d missing rails and no train can path along it; something in the corridor is not being cleared",
+      failed))
+  end
+  return usable
 end
 
---- Re-verify the line after a load. Everything is indestructible and survives
---- in the save, so the normal case is a single validity check and nothing else.
+--- Re-verify the line. Everything is indestructible and survives in the save, so
+--- the normal case is one entity lookup plus one count, which is what makes this
+--- safe to call mid-cycle. The stored built flag is only ever an optimisation
+--- hint, never the answer: what is actually on the surface decides.
 function rail_infra.ensure()
   local infra = storage.taxes and storage.taxes.infra
   if not infra then return false end
-  if infra.built and rail_infra.station() then return true end
+
+  local surface = util.surface()
+  if not surface then return rail_infra.build() end
+
+  -- A nil count means the query itself failed, which is no evidence of damage,
+  -- so do not tear the line down over it.
+  local rails = count_line_rails(surface)
+  local rails_ok = rails == nil or rails >= expected_rail_count()
+  local stop = rail_infra.station()
+
+  if rails_ok and station_is_valid(stop) then
+    infra.built = true
+    return true
+  end
+
+  local force = util.player_force()
+
+  -- The line is intact and only the station is wrong. Re-placing a single entity
+  -- costs a handful of API calls where build() re-walks several thousand tiles,
+  -- and train_manager calls ensure() in the middle of a cycle.
+  if rails_ok and force then
+    log("[taxes] the tax station is missing or unusable, repairing it without rebuilding the line")
+    local repaired = place_station(surface, force)
+    if repaired then
+      adopt_station(infra, repaired)
+      infra.built = true
+      return true
+    end
+  end
+
+  if not rails_ok then
+    log(string.format(
+      "[taxes] WARNING: the tax line is damaged, %d of %d rails present, rebuilding it",
+      rails or -1, expected_rail_count()))
+  end
   return rail_infra.build()
 end
 
@@ -326,10 +487,29 @@ end
 
 -- Event handlers ------------------------------------------------------------
 
---- Cancel a mining attempt on tax infrastructure. Handles both
---- on_pre_player_mined_item and on_robot_pre_mined. The entities are already
---- minable = false so this should never fire; it re-asserts the flags in case
---- something cleared them and explains the refusal to the player.
+--- Tell whoever is mining that they may not. The robot variant of the event
+--- carries no player_index, so there is nobody to print to on that path and the
+--- log is the only record we get.
+local function warn_miner(event, entity)
+  if event.player_index then
+    local player = game.get_player(event.player_index)
+    if player then player.print({ "taxes.cannot-mine" }) end
+    return
+  end
+  log(string.format(
+    "[taxes] a construction robot tried to mine tax infrastructure (%s at x = %s, y = %s)",
+    entity.name, tostring(entity.position.x), tostring(entity.position.y)))
+end
+
+--- Warn about a mining attempt on tax infrastructure. Handles both
+--- on_pre_player_mined_item and on_robot_pre_mined.
+---
+--- This CANNOT cancel a mine that is already under way: setting minable inside
+--- the handler does not abort the operation the engine has started. The real
+--- protection is minable = false set at build time, and rail_infra.on_mined is
+--- the net that catches anything which slips through anyway. So this handler is
+--- purely the warning path, plus a re-assertion of flags something may have
+--- cleared.
 function rail_infra.on_pre_mined(event)
   local entity = event and event.entity
   if not util.is_tax_entity(entity) then return end
@@ -337,13 +517,73 @@ function rail_infra.on_pre_mined(event)
   entity.minable = false
   entity.destructible = false
 
-  if event.player_index then
-    local player = game.get_player(event.player_index)
-    if player then player.print({ "taxes.cannot-mine" }) end
+  warn_miner(event, entity)
+end
+
+--- Put back a piece of the line that was mined anyway. Handles both
+--- on_player_mined_entity and on_robot_mined_entity, which fire once the mine is
+--- irreversible, so restoring is the only protection left.
+---
+--- Only the static line is rebuilt. Rolling stock is train_manager's, tracked by
+--- unit_number, and conjuring a replacement locomotive here would hand it an
+--- orphan it never sees; that case is logged for a human instead.
+function rail_infra.on_mined(event)
+  local entity = event and event.entity
+  if not util.is_tax_entity(entity) then return end
+
+  warn_miner(event, entity)
+
+  local rebuildable = entity.type == "straight-rail" or entity.type == "train-stop"
+  if not rebuildable then
+    log(string.format(
+      "[taxes] tax rolling stock (%s) was mined and cannot be restored from here", entity.name))
+    util.unprotect(entity)
+    return
   end
+
+  local surface = entity.surface
+  local spec = {
+    name = entity.name,
+    position = { x = entity.position.x, y = entity.position.y },
+    direction = entity.direction,
+    force = entity.force,
+  }
+  local backer_name = nil
+  if entity.type == "train-stop" then backer_name = entity.backer_name end
+
+  -- The engine destroys the entity the moment this handler returns, so the
+  -- replacement cannot be created while the original still occupies the slot.
+  -- Destroying it here is what frees the ground for the rebuild.
+  util.unprotect(entity)
+  entity.destroy()
+
+  -- The mined item is in the buffer and would otherwise be a free rail for
+  -- rebuilding something we just put back at no cost.
+  if event.buffer and event.buffer.valid then event.buffer.clear() end
+
+  local rebuilt = surface.create_entity(spec)
+  if not rebuilt then
+    log(string.format(
+      "[taxes] WARNING: %s at x = %s, y = %s was mined and could not be rebuilt; the line now has a gap",
+      spec.name, tostring(spec.position.x), tostring(spec.position.y)))
+    return
+  end
+
+  if backer_name then rebuilt.backer_name = backer_name end
+  util.protect(rebuilt, false)
+
+  if rebuilt.type == "train-stop" then
+    local infra = storage.taxes and storage.taxes.infra
+    if infra then adopt_station(infra, rebuilt) end
+  end
+  log(string.format("[taxes] restored %s that was mined out of the tax line", spec.name))
 end
 
 --- Undo a deconstruction order on tax infrastructure the moment it is placed.
+--- The order belongs to the force that issued it, not to the entity, so cancel
+--- for the issuing force first; an order from another force would otherwise stay
+--- marked forever. The entity's own force is cancelled too when it differs, in
+--- case the issuer cannot be identified from the event.
 function rail_infra.on_marked_for_deconstruction(event)
   local entity = event and event.entity
   if not util.is_tax_entity(entity) then return end
@@ -351,7 +591,18 @@ function rail_infra.on_marked_for_deconstruction(event)
   local player = nil
   if event.player_index then player = game.get_player(event.player_index) end
 
-  entity.cancel_deconstruction(entity.force, player)
+  local ordering_force = entity.force
+  if player and player.valid then
+    ordering_force = player.force
+  elseif event.robot and event.robot.valid then
+    ordering_force = event.robot.force
+  end
+
+  entity.cancel_deconstruction(ordering_force, player)
+  if ordering_force.name ~= entity.force.name then
+    entity.cancel_deconstruction(entity.force, player)
+  end
+
   if player then player.print({ "taxes.cannot-deconstruct" }) end
 end
 

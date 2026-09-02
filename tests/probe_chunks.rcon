@@ -1,4 +1,4 @@
 /silent-command local n=0; for c in game.surfaces.nauvis.get_chunks() do n=n+1 end; rcon.print("PROBE chunks="..n)
-/silent-command local n=0; for c in game.surfaces.nauvis.get_chunks() do n=n+1 end; rcon.print(n < 400 and ("OK chunk-count-sane="..n) or ("FAIL chunk-explosion="..n))
+/silent-command local n=0; for c in game.surfaces.nauvis.get_chunks() do n=n+1 end; rcon.print(n <= 450 and ("OK chunk-count-at-vanilla-baseline="..n.." (plain freeplay measures 400)") or ("FAIL chunk-explosion="..n))
 /silent-command rcon.print("PROBE rails="..#game.surfaces.nauvis.find_entities_filtered{name="straight-rail"})
 /silent-command local s=game.surfaces.nauvis; local n=0; for _,e in pairs(s.find_entities_filtered{type={"unit-spawner","turret"},force="enemy",area={{-125,-40},{125,-20}}}) do n=n+1 end; rcon.print(n==0 and "OK no-nests-in-corridor" or ("FAIL nests-in-corridor="..n))

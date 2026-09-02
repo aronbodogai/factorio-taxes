@@ -100,7 +100,12 @@ local taxable_items = {
   -- Tier 8 — only reachable once rockets fly. --------------------------------
   -- Space science has no recipe; it is a rocket launch product, so the silo
   -- technology is the correct gate for it.
-  { name = "space-science-pack",      kind = "item",  tier = 8, tech = "rocket-silo",             unit = 50 },
+  -- Deliberately absent: space-science-pack. It has no crafting recipe at all,
+  -- arriving only as a lump of 1000 per rocket launch, so it is a burst rather
+  -- than a rate. The growth curve would demand roughly 219000 of it by cycle 60,
+  -- which is 219 launches inside a three-minute loading window. It fails the
+  -- same "cannot be produced in bulk on demand" test that already excluded
+  -- rocket-part, so tier 7 is the top of the catalogue.
 }
 
 return taxable_items

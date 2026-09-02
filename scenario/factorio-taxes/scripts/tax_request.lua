@@ -22,22 +22,34 @@ local MAX_FLUID_WAGONS = 4
 -- The one entry that is guaranteed to work in any base game, used only if the
 -- catalogue somehow filters down to nothing. Iron plate is craftable from the
 -- first tick, so a demand built from it can never be undeliverable.
-local FALLBACK_ENTRY = { name = "iron-plate", kind = "item", tier = 1, tech = nil, unit = 100 }
+local FALLBACK_ENTRY = { name = "iron-plate", kind = "item", tier = 1, tech = nil, unit = 200 }
 
--- Technology names the catalogue references but the loaded prototypes do not
--- define. This table is a log de-duplicator and holds no game state, so it
--- deliberately lives outside storage; losing it on reload costs one repeated
--- log line and nothing else.
+-- Technology and prototype names the catalogue references but the loaded game
+-- does not define. These tables are log de-duplicators and hold no game state,
+-- so they deliberately live outside storage; losing them on reload costs one
+-- repeated log line and nothing else.
 local warned_technologies = {}
+local warned_prototypes = {}
 
 --- True if the prototype a catalogue entry names exists in this game.
 -- A missing prototype could never be delivered, so it must not reach a demand
 -- even if the gating technology reads as researched.
 local function prototype_exists(entry)
+  local exists
   if entry.kind == "fluid" then
-    return prototypes.fluid[entry.name] ~= nil
+    exists = prototypes.fluid[entry.name] ~= nil
+  else
+    exists = prototypes.item[entry.name] ~= nil
   end
-  return prototypes.item[entry.name] ~= nil
+  -- A misspelled item name would otherwise vanish without trace, which is the
+  -- exact failure this catalogue is most likely to develop. Log it once, the
+  -- same way an unknown technology name is logged.
+  if not exists and not warned_prototypes[entry.name] then
+    warned_prototypes[entry.name] = true
+    log("[taxes] catalogue names a " .. tostring(entry.kind) .. " prototype that does "
+      .. "not exist in this game: " .. tostring(entry.name))
+  end
+  return exists
 end
 
 --- True if the force has unlocked the entry.

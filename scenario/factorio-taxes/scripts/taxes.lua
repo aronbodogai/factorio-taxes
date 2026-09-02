@@ -111,6 +111,17 @@ taxes.events = {
     rail_infra.on_pre_mined(event)
   end,
 
+  -- The pre-mined events cannot cancel a mine that is already under way, so they
+  -- are only a warning. These two are the actual repair: anything that did get
+  -- mined is put back and re-protected.
+  [defines.events.on_player_mined_entity] = function(event)
+    rail_infra.on_mined(event)
+  end,
+
+  [defines.events.on_robot_mined_entity] = function(event)
+    rail_infra.on_mined(event)
+  end,
+
   [defines.events.on_marked_for_deconstruction] = function(event)
     rail_infra.on_marked_for_deconstruction(event)
   end,

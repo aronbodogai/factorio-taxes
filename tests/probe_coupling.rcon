@@ -1,0 +1,14 @@
+# Does the rolling stock actually couple into ONE train? Tests that track wagons
+# by unit_number would pass even if it built N separate one-car trains.
+/tax-cycle 20
+/tax-demand 20
+/silent-command local d=storage.taxes.demand; local p={}; for _,e in ipairs(d) do p[#p+1]=e.name.."x"..e.count end; rcon.print("PROBE demand "..table.concat(p," "))
+/tax-train
+/silent-command local s=game.surfaces.nauvis; local stock=s.find_entities_filtered{name={"locomotive","cargo-wagon","fluid-wagon"}}; local ids,n={},0; for _,e in pairs(stock) do local t=e.train; if t then if not ids[t.id] then ids[t.id]=0; n=n+1 end; ids[t.id]=ids[t.id]+1 end end; local parts={}; for id,c in pairs(ids) do parts[#parts+1]=id..":"..c end; rcon.print("PROBE stock="..#stock.." distinct_trains="..n.." ["..table.concat(parts," ").."]")
+/silent-command local s=game.surfaces.nauvis; local stock=s.find_entities_filtered{name={"locomotive","cargo-wagon","fluid-wagon"}}; local ids,n={},0; for _,e in pairs(stock) do local t=e.train; if t and not ids[t.id] then ids[t.id]=true; n=n+1 end end; rcon.print(n==1 and ("OK single-coupled-train stock="..#stock) or ("FAIL uncoupled trains="..n.." stock="..#stock))
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; rcon.print("PROBE carriages="..(l and #l.train.carriages or 0))
+/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}; rcon.print("PROBE fluid-wagons="..#fw)
+/silent-command local s=game.surfaces.nauvis; local xs={}; for _,e in pairs(s.find_entities_filtered{name={"locomotive","cargo-wagon","fluid-wagon"}}) do xs[#xs+1]=math.floor(e.position.x) end; table.sort(xs); rcon.print("PROBE stock_x "..table.concat(xs,","))
+/tax-arrive
+/silent-command local s=game.surfaces.nauvis; local stock=s.find_entities_filtered{name={"locomotive","cargo-wagon","fluid-wagon"}}; rcon.print(#stock>0 and ("OK force-to-station-kept-train stock="..#stock) or "FAIL force-to-station-lost-the-train")
+/silent-command local s=game.surfaces.nauvis; local xs={}; for _,e in pairs(s.find_entities_filtered{name={"locomotive","cargo-wagon","fluid-wagon"}}) do xs[#xs+1]=math.floor(e.position.x) end; table.sort(xs); rcon.print("PROBE after_arrive_x "..table.concat(xs,","))
