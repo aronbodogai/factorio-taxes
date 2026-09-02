@@ -14,8 +14,8 @@ Status key: `TODO` / `WIP` / `REVIEW` (built, awaiting adversarial check) /
 | 0.3 | `docs/DESIGN.md` specification | lead | DONE |
 | 0.4 | `scripts/config.lua` — every tunable | lead | DONE |
 | 0.5 | `scripts/util.lua` — shared helpers | lead | DONE |
-| 0.6 | `description.json`, locale skeleton | lead | TODO |
-| 0.7 | `tools/` — deploy and headless run scripts, RCON client | lead | TODO |
+| 0.6 | `description.json`, locale skeleton | lead | WIP |
+| 0.7 | `tools/` — deploy and headless run scripts, RCON client | lead | DONE |
 
 ## Phase 1 — Modules
 
@@ -30,8 +30,9 @@ subagent that runs against the spec and the headless server.
 | 1.4 | Train spawn, composition, filters, arrival, departure, settlement | `scripts/train_manager.lua` | TODO |
 | 1.5 | Proportional biter punishment waves | `scripts/punishment.lua` | TODO |
 | 1.6 | Player-facing UI and locale strings | `scripts/gui.lua` | TODO |
-| 1.7 | Cycle state machine tying the modules together | `scripts/tax_schedule.lua` | TODO |
-| 1.8 | Scenario entry point and event wiring | `control.lua` | TODO |
+| 1.7 | Cycle state machine tying the modules together | `scripts/tax_schedule.lua` | REVIEW |
+| 1.8 | Scenario entry point and event wiring | `control.lua`, `scripts/taxes.lua` | REVIEW |
+| 1.9 | Debug commands so every stage can be driven by hand | `scripts/commands.lua` | REVIEW |
 
 ## Phase 2 — Verification
 

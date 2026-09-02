@@ -96,9 +96,9 @@ if [ "$RCON_STATUS" -ne 0 ]; then
   echo "RESULT: FAIL (rcon client exited $RCON_STATUS)"
   STATUS=1
 fi
-if grep -qE '^FAIL' "$OUT"; then
+if grep -qE '^FAIL|ERROR in /' "$OUT"; then
   echo "RESULT: FAIL (assertion)"
-  grep -E '^FAIL' "$OUT"
+  grep -E '^FAIL|ERROR in /' "$OUT"
   STATUS=1
 fi
 # Match genuine failures only. A plain "control.lua:37:" line is what log()
