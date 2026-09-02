@@ -17,7 +17,7 @@ local tax_request = {}
 -- key for it because the number only means anything here: it is the fluid-side
 -- twin of config.MAX_DEMAND_STACKS, keeping a late-game demand short enough
 -- that the train still fits beside the station.
-local MAX_FLUID_WAGONS = 4
+local MAX_FLUID_WAGONS = 2
 
 -- The one entry that is guaranteed to work in any base game, used only if the
 -- catalogue somehow filters down to nothing. Iron plate is craftable from the
@@ -106,7 +106,18 @@ end
 -- Growth compounds, so the clamps are what stop a long game from asking for a
 -- quantity no train could carry.
 local function quantity_for(entry, cycle)
-  local count = math.ceil(entry.unit * (1 + config.GROWTH_RATE) ^ cycle)
+  -- Growth is capped rather than left to compound. `unit` is calibrated as the
+  -- effort at cycle 0, but a late-game item only becomes available once the
+  -- multiplier is already large, so uncapped compounding made the first blue
+  -- circuit demand arrive pre-multiplied into the thousands. Measured before
+  -- the cap: 24000 utility science packs per ten-minute cycle, a sustained 40
+  -- per second, which no reasonable base produces.
+  local multiplier = (1 + config.GROWTH_RATE) ^ cycle
+  if multiplier > config.MAX_GROWTH_MULTIPLIER then
+    multiplier = config.MAX_GROWTH_MULTIPLIER
+  end
+
+  local count = math.ceil(entry.unit * multiplier)
 
   local cap
   if entry.kind == "fluid" then

@@ -15,7 +15,8 @@ local config = {
 
   -- Difficulty ---------------------------------------------------------------
   GRACE_CYCLES            = 1,   -- leading cycles that never punish, however badly they go
-  GROWTH_RATE             = 0.15, -- per-cycle compounding growth of demanded quantities
+  GROWTH_RATE             = 0.06, -- per-cycle compounding growth of demanded quantities
+  MAX_GROWTH_MULTIPLIER   = 40,  -- ceiling on that compounding, so a long game plateaus rather than diverging
   TIER_BIAS               = 2.5, -- exponent biasing random selection toward higher tiers
   TIER_WINDOW             = 1,   -- tiers below the highest available that stay eligible
   MAX_DEMAND_TYPES        = 4,   -- cap on distinct entries in one demand

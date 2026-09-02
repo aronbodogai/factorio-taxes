@@ -196,7 +196,8 @@ Every tunable lives in `scripts/config.lua`. Defaults:
 | `LOADING_WINDOW` | `3 * 60 * 60` | Loading time once the train is at the station |
 | `ARRIVAL_TIMEOUT` | `2 * 60 * 60` | Failsafe before the train is force-placed |
 | `GRACE_CYCLES` | `1` | Cycles at the start with no punishment |
-| `GROWTH_RATE` | `0.15` | Per-cycle demand growth |
+| `GROWTH_RATE` | `0.06` | Per-cycle demand growth |
+| `MAX_GROWTH_MULTIPLIER` | `40` | Ceiling on that growth, so a long game plateaus |
 | `TIER_BIAS` | `2.5` | Exponent biasing selection toward higher tiers |
 | `TIER_WINDOW` | `1` | How many tiers below the top stay eligible |
 | `MAX_DEMAND_TYPES` | `4` | Cap on distinct demanded items per cycle |
@@ -210,3 +211,36 @@ Every tunable lives in `scripts/config.lua`. Defaults:
 * No Space Age, elevated rails, or quality prototypes.
 * No new item, entity, or technology prototypes at all — this is runtime-only.
 * No multi-surface support beyond `nauvis`.
+
+## 11. Balance
+
+The curve was set from measurements, not guesses. `tests/balance.rcon` samples
+forty demands at representative cycles and tech levels; one cycle is
+`CYCLE_PERIOD + ANNOUNCE_LEAD + LOADING_WINDOW`, ten minutes by default, so cycle
+20 is roughly three hours into a game and cycle 60 is ten.
+
+The first attempt used `GROWTH_RATE = 0.15` with no ceiling, which produced this
+at cycle 60: 24000 utility science packs, 12000 processing units, and 200000 of
+each demanded fluid, every ten minutes. That is a sustained 40 science packs per
+second, which no reasonable base produces.
+
+The flaw was structural rather than a bad constant. `unit` is calibrated as the
+effort at cycle 0, but a late-game item only becomes demandable once the growth
+multiplier is already enormous, so its very first demand arrived pre-multiplied.
+Lowering the rate to `0.06` and capping the multiplier at 40 fixes it, and the
+fluid `unit` values were cut by roughly a factor of six because every fluid was
+otherwise pinned to its wagon ceiling from cycle 20 onward.
+
+Measured after tuning, per ten-minute cycle:
+
+| Cycle | Roughly | Demand |
+| --- | --- | --- |
+| 0 | start | 200 iron plate, 100 firearm magazine |
+| 10 | 1.7 h | 180 electronic circuit, 144 logistic science, 108 steel |
+| 20 | 3.3 h | 65 processing unit, 97 utility science, 6415 light oil |
+| 40 | 6.7 h | 206 processing unit, 309 utility science, 20572 light oil |
+| 60 | 10 h | 660 processing unit, 990 utility science, 65976 light oil |
+
+At cycle 60 that is 1.65 utility science per second sustained, which is a real
+but fair demand on a ten-hour base. The multiplier reaches its ceiling around
+cycle 63, so the endgame plateaus rather than diverging.

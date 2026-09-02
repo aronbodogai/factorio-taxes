@@ -51,7 +51,7 @@ subagent that runs against the spec and the headless server.
 
 | # | Task | Status |
 | --- | --- | --- |
-| 3.1 | Balance pass on growth rates and wave sizes | TODO |
+| 3.1 | Balance pass on growth rates and wave sizes | DONE |
 | 3.2 | Optional mod wrapper so the scenario can ship as a mod | TODO |
 | 3.3 | Player-facing README with install instructions | DONE |
 

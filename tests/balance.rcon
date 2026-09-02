@@ -1,0 +1,27 @@
+# Balance survey. Prints what the tax actually demands at representative points
+# in a real game, so the growth curve can be judged against factory output
+# rather than assumed. One cycle is CYCLE_PERIOD + ANNOUNCE_LEAD + LOADING_WINDOW
+# = 10 minutes by default, so cycle 20 is about 3.3 hours in and cycle 40 is 6.7.
+/silent-command rcon.print("PROBE cycle-minutes="..((18000+7200+10800)/3600))
+/tax-cycle 0
+/tax-sample 40
+/tax-cycle 5
+/tax-sample 40
+/tax-cycle 10
+/tax-sample 40
+# Early game, only the first few technologies.
+/silent-command local f=game.forces.player; for _,t in pairs({"electronics","steel-processing","logistic-science-pack"}) do if f.technologies[t] then f.technologies[t].researched=true end end; rcon.print("PROBE tech=early")
+/tax-cycle 10
+/tax-sample 40
+# Mid game.
+/silent-command local f=game.forces.player; for _,t in pairs({"advanced-circuit","plastics","oil-processing","sulfur-processing","chemical-science-pack"}) do if f.technologies[t] then f.technologies[t].researched=true end end; rcon.print("PROBE tech=mid")
+/tax-cycle 20
+/tax-sample 40
+# Late game.
+/silent-command local f=game.forces.player; for _,t in pairs({"processing-unit","low-density-structure","robotics","utility-science-pack","production-science-pack","rocket-fuel","advanced-oil-processing","lubricant"}) do if f.technologies[t] then f.technologies[t].researched=true end end; rcon.print("PROBE tech=late")
+/tax-cycle 20
+/tax-sample 40
+/tax-cycle 40
+/tax-sample 40
+/tax-cycle 60
+/tax-sample 40

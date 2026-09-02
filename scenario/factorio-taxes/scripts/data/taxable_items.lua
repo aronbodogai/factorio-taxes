@@ -8,7 +8,7 @@
 -- would not crash: the entry would simply never become available, so the names
 -- matter more than they look like they do.
 --
--- TIER SCALE (1..8) — roughly "how many production steps deep is this, and how
+-- TIER SCALE (1..7) — roughly "how many production steps deep is this, and how
 -- far into the tech tree do you have to be to run that chain at scale":
 --
 --   1  Raw or first-smelt: mined ore, plates, coal, stone.
@@ -19,7 +19,6 @@
 --   6  Chemical-science era: blue science, electric engines, refined oils.
 --   7  Late intermediates: blue circuits, low density structures, robot
 --      frames, purple and yellow science, rocket fuel, fuel cells.
---   8  Post-silo: space science, which only exists once you can launch.
 --
 -- `unit` is the demanded quantity at cycle 0 and is calibrated by rough
 -- raw-ore-equivalent effort rather than by item count, so that a tier-1 and a
@@ -56,7 +55,7 @@ local taxable_items = {
   -- Water is gated on fluid-handling rather than steam-power because a pump is
   -- what the player actually needs to fill a fluid wagon, and fluid-handling is
   -- the technology that unlocks it.
-  { name = "water",                   kind = "fluid", tier = 3, tech = "fluid-handling",          unit = 25000 },
+  { name = "water",                   kind = "fluid", tier = 3, tech = "fluid-handling",          unit = 3000 },
 
   -- Tier 4 — oil, logistics, and the chemistry that follows them. ------------
   { name = "logistic-science-pack",   kind = "item",  tier = 4, tech = "logistic-science-pack",   unit = 80 },
@@ -69,24 +68,24 @@ local taxable_items = {
   { name = "concrete",                kind = "item",  tier = 4, tech = "concrete",                unit = 200 },
   -- oil-gathering unlocks the pumpjack and itself requires fluid-handling, so a
   -- force that can be asked for crude oil always has a pump to load it with.
-  { name = "crude-oil",               kind = "fluid", tier = 4, tech = "oil-gathering",           unit = 20000 },
-  { name = "petroleum-gas",           kind = "fluid", tier = 4, tech = "oil-processing",          unit = 15000 },
+  { name = "crude-oil",               kind = "fluid", tier = 4, tech = "oil-gathering",           unit = 2500 },
+  { name = "petroleum-gas",           kind = "fluid", tier = 4, tech = "oil-processing",          unit = 2000 },
 
   -- Tier 5 — red circuits and the acid chain behind them. --------------------
   { name = "advanced-circuit",        kind = "item",  tier = 5, tech = "advanced-circuit",        unit = 60 },
   { name = "battery",                 kind = "item",  tier = 5, tech = "battery",                 unit = 80 },
   { name = "explosives",              kind = "item",  tier = 5, tech = "explosives",              unit = 80 },
   { name = "military-science-pack",   kind = "item",  tier = 5, tech = "military-science-pack",   unit = 60 },
-  { name = "sulfuric-acid",           kind = "fluid", tier = 5, tech = "sulfur-processing",       unit = 12000 },
+  { name = "sulfuric-acid",           kind = "fluid", tier = 5, tech = "sulfur-processing",       unit = 1500 },
 
   -- Tier 6 — chemical science era. -------------------------------------------
   { name = "chemical-science-pack",   kind = "item",  tier = 6, tech = "chemical-science-pack",   unit = 50 },
   { name = "electric-engine-unit",    kind = "item",  tier = 6, tech = "electric-engine",         unit = 40 },
   -- Basic oil processing yields only petroleum gas, so light and heavy oil are
   -- genuinely gated on advanced-oil-processing.
-  { name = "light-oil",               kind = "fluid", tier = 6, tech = "advanced-oil-processing", unit = 15000 },
-  { name = "heavy-oil",               kind = "fluid", tier = 6, tech = "advanced-oil-processing", unit = 15000 },
-  { name = "lubricant",               kind = "fluid", tier = 6, tech = "lubricant",               unit = 10000 },
+  { name = "light-oil",               kind = "fluid", tier = 6, tech = "advanced-oil-processing", unit = 2000 },
+  { name = "heavy-oil",               kind = "fluid", tier = 6, tech = "advanced-oil-processing", unit = 2000 },
+  { name = "lubricant",               kind = "fluid", tier = 6, tech = "lubricant",               unit = 1200 },
 
   -- Tier 7 — the late intermediates a megabase is actually built out of. -----
   { name = "processing-unit",         kind = "item",  tier = 7, tech = "processing-unit",         unit = 20 },
@@ -97,9 +96,6 @@ local taxable_items = {
   { name = "rocket-fuel",             kind = "item",  tier = 7, tech = "rocket-fuel",             unit = 20 },
   { name = "uranium-fuel-cell",       kind = "item",  tier = 7, tech = "nuclear-power",           unit = 20 },
 
-  -- Tier 8 — only reachable once rockets fly. --------------------------------
-  -- Space science has no recipe; it is a rocket launch product, so the silo
-  -- technology is the correct gate for it.
   -- Deliberately absent: space-science-pack. It has no crafting recipe at all,
   -- arriving only as a lump of 1000 per rocket launch, so it is a burst rather
   -- than a rate. The growth curve would demand roughly 219000 of it by cycle 60,
