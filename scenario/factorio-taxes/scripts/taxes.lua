@@ -4,7 +4,6 @@
 
 local config = require("scripts.config")
 local rail_infra = require("scripts.rail_infra")
-local train_manager = require("scripts.train_manager")
 local tax_schedule = require("scripts.tax_schedule")
 local gui = require("scripts.gui")
 local debug_commands = require("scripts.commands")
@@ -83,9 +82,6 @@ taxes.events = {
     tax_schedule.on_tick(event)
     if event.tick % config.UI_REFRESH == 0 then
       gui.refresh_all()
-    end
-    if storage.taxes.phase == "departing" then
-      train_manager.check_despawn()
     end
   end,
 

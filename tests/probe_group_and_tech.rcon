@@ -1,0 +1,33 @@
+# Two questions in one boot: does a scripted unit group act on set_command
+# without start_moving(), and does demand follow the researched tech tree?
+
+# --- Unit group behaviour ----------------------------------------------------
+/silent-command local s=game.surfaces.nauvis; storage.probe_units={}; for i=1,5 do local p=s.find_non_colliding_position("small-biter",{100+i*3,100},10,1); local u=p and s.create_entity{name="small-biter",position=p,force=game.forces.enemy}; if u then storage.probe_units[#storage.probe_units+1]=u end end; rcon.print("PROBE units="..#storage.probe_units)
+/silent-command local s=game.surfaces.nauvis; local g=s.create_unit_group{position={100,100},force=game.forces.enemy}; storage.probe_group=g; rcon.print("PROBE group="..tostring(g~=nil).." start_moving="..type(g and g.start_moving).." set_command="..type(g and g.set_command))
+/silent-command local g=storage.probe_group; for _,u in pairs(storage.probe_units) do if u.valid then g.add_member(u) end end; rcon.print("PROBE members="..#g.members.." state_before="..tostring(g.state))
+/silent-command local g=storage.probe_group; g.set_command{type=defines.command.attack_area,destination={0,0},radius=50,distraction=defines.distraction.by_enemy}; rcon.print("PROBE state_after_command="..tostring(g.state))
+/silent-command local g=storage.probe_group; local ok,err=pcall(function() g.start_moving() end); rcon.print("PROBE start_moving ok="..tostring(ok).." err="..tostring(err).." state="..tostring(g.state))
+/silent-command rcon.print("PROBE group_state_defines "..helpers.table_to_json(defines.group_state))
+
+# --- Demand follows the tech tree -------------------------------------------
+/silent-command local f=game.forces.player; f.technologies["electronics"].researched=true; f.technologies["advanced-circuit"].researched=true; storage.hist={}; rcon.print("PROBE tech-set electronics+advanced-circuit")
+/tax-demand 8
+/silent-command for _,e in pairs(storage.taxes.demand) do storage.hist[e.name]=(storage.hist[e.name] or 0)+1 end
+/tax-demand 8
+/silent-command for _,e in pairs(storage.taxes.demand) do storage.hist[e.name]=(storage.hist[e.name] or 0)+1 end
+/tax-demand 8
+/silent-command for _,e in pairs(storage.taxes.demand) do storage.hist[e.name]=(storage.hist[e.name] or 0)+1 end
+/tax-demand 8
+/silent-command for _,e in pairs(storage.taxes.demand) do storage.hist[e.name]=(storage.hist[e.name] or 0)+1 end
+/tax-demand 8
+/silent-command for _,e in pairs(storage.taxes.demand) do storage.hist[e.name]=(storage.hist[e.name] or 0)+1 end
+/tax-demand 8
+/silent-command for _,e in pairs(storage.taxes.demand) do storage.hist[e.name]=(storage.hist[e.name] or 0)+1 end
+/tax-demand 8
+/silent-command for _,e in pairs(storage.taxes.demand) do storage.hist[e.name]=(storage.hist[e.name] or 0)+1 end
+/tax-demand 8
+/silent-command for _,e in pairs(storage.taxes.demand) do storage.hist[e.name]=(storage.hist[e.name] or 0)+1 end
+/silent-command local out={}; for k,v in pairs(storage.hist) do out[#out+1]=k.."="..v end; table.sort(out); rcon.print("PROBE hist "..table.concat(out," "))
+/silent-command local low=0; for k,v in pairs(storage.hist) do if k=="iron-plate" or k=="copper-plate" or k=="coal" or k=="stone" or k=="iron-gear-wheel" then low=low+v end end; rcon.print(low==0 and "OK no-low-tier-once-red-chips-unlocked" or ("FAIL low-tier-draws="..low))
+/silent-command rcon.print(storage.hist["advanced-circuit"] and ("OK red-chips-demanded="..storage.hist["advanced-circuit"]) or "FAIL red-chips-never-demanded")
+/silent-command rcon.print(storage.hist["electronic-circuit"]==nil and "OK green-chips-excluded" or ("PROBE green-chips-still-drawn="..tostring(storage.hist["electronic-circuit"])))

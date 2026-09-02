@@ -109,3 +109,28 @@ Write assertions as one command per line:
 
 `helpers.table_to_json(t)` is available and is the easiest way to dump a table
 into the RCON output.
+
+## Scripted unit groups must be told to move
+
+`set_command` alone does NOT make a scripted group act. Probed on 2.0.77 with a
+five-member group (`tests/probe_group_and_tech.rcon`):
+
+```
+state after add_member      --> 0  (gathering)
+state after set_command     --> 0  (gathering)
+state after start_moving()  --> 1  (moving)
+```
+
+`defines.group_state` is
+`{gathering=0, moving=1, attacking_distraction=2, attacking_target=3, finished=4, pathfinding=5, wander_in_group=6}`.
+
+So every scripted attack must call `group.start_moving()` after `set_command`, or
+the wave stands at its spawn ring forever. `create_unit_group{position, force}`
+returns a value with both `set_command` and `start_moving` as functions.
+
+## Demand does follow the tech tree
+
+With `electronics` and `advanced-circuit` researched and nothing else, eight
+consecutive demand draws produced `advanced-circuit` every time, with no
+`electronic-circuit` and no tier-1 items. The tier-window rule in DESIGN.md
+section 5 behaves as intended.

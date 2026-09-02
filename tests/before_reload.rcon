@@ -1,0 +1,11 @@
+# Drive the scenario into a mid-cycle state, then save. The companion file
+# tests/after_reload.rcon asserts that this state survived the round trip.
+/tax-build
+/tax-cycle 4
+/tax-demand 4
+/tax-train
+/tax-arrive
+/tax-fill 0.5
+/silent-command local d=storage.taxes.demand; local names,counts={},{}; for _,e in ipairs(d) do names[#names+1]=e.name; counts[#counts+1]=e.count end; storage.reload_expect={phase=storage.taxes.phase, cycle=storage.taxes.cycle, names=table.concat(names,","), counts=table.concat(counts,","), stock=#game.surfaces.nauvis.find_entities_filtered{name={"locomotive","cargo-wagon","fluid-wagon"}}, rails=#game.surfaces.nauvis.find_entities_filtered{name="straight-rail"}}; rcon.print("PROBE saved-state phase="..storage.reload_expect.phase.." cycle="..storage.reload_expect.cycle.." demand="..storage.reload_expect.names.." stock="..storage.reload_expect.stock.." rails="..storage.reload_expect.rails)
+/silent-command local c=0; for _,e in pairs(game.surfaces.nauvis.find_entities_filtered{name="cargo-wagon"}) do local inv=e.get_inventory(defines.inventory.cargo_wagon); for i=1,#inv do local s=inv[i]; if s.valid_for_read then c=c+s.count end end end; storage.reload_expect.cargo=c; rcon.print("PROBE cargo-loaded="..c)
+/server-save taxes-reload

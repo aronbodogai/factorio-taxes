@@ -147,8 +147,52 @@ local definitions = {
     help = "Spawn a punishment wave directly. Argument: shortfall 0..1, default 1.",
     handler = function(command)
       local shortfall = math.max(0, math.min(1, number_arg(command, 1)))
-      local spawned = punishment.spawn_wave(shortfall) or 0
-      respond(command, "spawned " .. spawned .. " units for shortfall " .. shortfall)
+      local spawned, reason = punishment.spawn_wave(shortfall)
+      spawned = spawned or 0
+      -- A wave of zero is usually deliberate rather than broken, so say which.
+      respond(command, "spawned " .. spawned .. " units for shortfall " .. shortfall
+        .. (spawned == 0 and reason and (" (" .. tostring(reason) .. ")") or ""))
+    end,
+  },
+  {
+    name = "tax-wave",
+    help = "Report the pure wave calculation without spawning. Arguments: <shortfall> [cycle].",
+    handler = function(command)
+      local shortfall, cycle = string.match(command.parameter or "", "^([%d.]+)%s*(%d*)$")
+      shortfall = tonumber(shortfall) or 1
+      cycle = tonumber(cycle) or storage.taxes.cycle
+      local mix = punishment.unit_mix(
+        game.forces.enemy.get_evolution_factor(util.surface()))
+      local parts = {}
+      for _, entry in pairs(mix or {}) do
+        parts[#parts + 1] = entry.name .. ":" .. entry.weight
+      end
+      respond(command, string.format("wave_size(%.2f, %d)=%d evolution=%.4f mix=[%s]",
+        shortfall, cycle, punishment.wave_size(shortfall, cycle),
+        game.forces.enemy.get_evolution_factor(util.surface()),
+        table.concat(parts, " ")))
+    end,
+  },
+  {
+    name = "tax-sample",
+    help = "Draw N demands without applying them and print a histogram. Useful for balance.",
+    handler = function(command)
+      local draws = math.max(1, math.min(500, math.floor(number_arg(command, 20))))
+      local histogram, totals = {}, {}
+      for _ = 1, draws do
+        for _, entry in pairs(tax_request.generate(storage.taxes.cycle)) do
+          histogram[entry.name] = (histogram[entry.name] or 0) + 1
+          totals[entry.name] = (totals[entry.name] or 0) + entry.count
+        end
+      end
+      local parts = {}
+      for name, count in pairs(histogram) do
+        parts[#parts + 1] = string.format("%s x%d (avg %d)", name, count,
+          math.floor(totals[name] / count))
+      end
+      table.sort(parts)
+      respond(command, draws .. " draws at cycle " .. storage.taxes.cycle
+        .. ": " .. table.concat(parts, ", "))
     end,
   },
   {

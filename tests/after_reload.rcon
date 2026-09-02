@@ -1,0 +1,16 @@
+# Assert the mid-cycle state saved by tests/before_reload.rcon came back intact
+# and that the scenario keeps running rather than erroring on the first tick.
+/silent-command rcon.print(storage.reload_expect and "OK expectations-restored" or "FAIL expectations-missing")
+/silent-command local e=storage.reload_expect; rcon.print(storage.taxes.phase==e.phase and ("OK phase-preserved="..e.phase) or ("FAIL phase "..e.phase.." -> "..tostring(storage.taxes.phase)))
+/silent-command local e=storage.reload_expect; rcon.print(storage.taxes.cycle==e.cycle and ("OK cycle-preserved="..e.cycle) or ("FAIL cycle "..e.cycle.." -> "..tostring(storage.taxes.cycle)))
+/silent-command local e=storage.reload_expect; local names={}; for _,d in ipairs(storage.taxes.demand) do names[#names+1]=d.name end; local now=table.concat(names,","); rcon.print(now==e.names and "OK demand-preserved" or ("FAIL demand "..e.names.." -> "..now))
+/silent-command local e=storage.reload_expect; local n=#game.surfaces.nauvis.find_entities_filtered{name={"locomotive","cargo-wagon","fluid-wagon"}}; rcon.print(n==e.stock and ("OK train-preserved stock="..n) or ("FAIL stock "..e.stock.." -> "..n))
+/silent-command local e=storage.reload_expect; local n=#game.surfaces.nauvis.find_entities_filtered{name="straight-rail"}; rcon.print(n==e.rails and ("OK rails-preserved="..n) or ("FAIL rails "..e.rails.." -> "..n))
+/silent-command local e=storage.reload_expect; local c=0; for _,w in pairs(game.surfaces.nauvis.find_entities_filtered{name="cargo-wagon"}) do local inv=w.get_inventory(defines.inventory.cargo_wagon); for i=1,#inv do local s=inv[i]; if s.valid_for_read then c=c+s.count end end end; rcon.print(c==e.cargo and ("OK cargo-preserved="..c) or ("FAIL cargo "..e.cargo.." -> "..c))
+/silent-command local r=game.surfaces.nauvis.find_entities_filtered{name="straight-rail"}[1]; rcon.print((r.destructible==false and r.minable==false) and "OK immutability-survived-reload" or "FAIL immutability-lost-on-reload")
+/silent-command local l=game.surfaces.nauvis.find_entities_filtered{name="locomotive"}[1]; rcon.print((l and l.destructible==false) and "OK loco-immutability-survived" or "FAIL loco-immutability-lost")
+# The cycle must keep running after a reload rather than stalling or erroring.
+/tax-status
+/tax-settle
+/silent-command rcon.print(storage.taxes.cycle==storage.reload_expect.cycle+1 and "OK cycle-advances-after-reload" or ("FAIL cycle-stuck at "..storage.taxes.cycle))
+/tax-status

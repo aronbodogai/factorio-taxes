@@ -11,7 +11,7 @@ local config = {
   LOADING_WINDOW  = 3 * MINUTE, -- time to fill the wagons once the train has stopped
   ARRIVAL_TIMEOUT = 2 * MINUTE, -- failsafe before an inbound train is force-placed
   DEPART_TIMEOUT  = 2 * MINUTE, -- failsafe before a departing train is force-removed
-  UI_REFRESH      = 30,         -- ticks between UI refreshes
+  UI_REFRESH      = 60,         -- ticks between UI refreshes, once per second
 
   -- Difficulty ---------------------------------------------------------------
   GRACE_CYCLES            = 1,   -- leading cycles that never punish, however badly they go
