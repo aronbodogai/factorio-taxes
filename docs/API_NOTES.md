@@ -151,3 +151,9 @@ positions along the line and generated **5645 chunks** at map start, measured
 with `tests/probe_chunks.rcon`. A normal freeplay start is a few hundred. The
 cost is a slow `on_init`, a save inflated by tens of megabytes, and thousands of
 chunks of enemy nests pre-generated. Pass a small radius such as `1`.
+
+After the fix, measured against a copy of base freeplay booted through the same
+harness: plain freeplay generates 400 chunks and this scenario also generates
+400, so the rail corridor now costs nothing over vanilla. To reproduce the
+baseline, copy `data/base/scenarios/freeplay` into the server's `scenarios/`
+directory and run the harness with `SCENARIO=vanilla-freeplay`.
