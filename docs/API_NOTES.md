@@ -182,3 +182,27 @@ insert 19999 light-oil into wagon A --> accepted, total exactly 20000
 `wagon.insert_fluid{name=, amount=}` and `wagon.get_fluid_count(name)` both work
 regardless, which is how the contents of a fluid wagon are read and written.
 Capacity reads back as `50000` from `wagon.prototype.fluid_capacity`.
+
+## Constant combinators use logistic sections, not parameters
+
+`LuaConstantCombinatorControlBehavior` has NO `parameters` field in 2.0.77 —
+reading it raises `doesn't contain key parameters`. It uses logistic sections,
+and a freshly created combinator already has one (`sections_count == 1`), so
+`get_section(1)` is enough and `add_section()` is only needed for a second.
+
+Verified working:
+
+```lua
+local behavior = combinator.get_control_behavior()
+local section = behavior.get_section(1) or behavior.add_section()
+section.filters = {
+  { value = { type = "item",  name = "iron-plate", quality = "normal", comparator = "=" }, min = 100 },
+  { value = { type = "fluid", name = "water",                          comparator = "=" }, min = 25000 },
+}
+```
+
+`min` carries the signal value. Item filters take a `quality`; fluid and virtual
+filters do not. Reading `section.filters` back returns the same shape with an
+extra `import_from` key on item entries.
+
+Virtual signals use `type = "virtual"` with names like `signal-T`.
