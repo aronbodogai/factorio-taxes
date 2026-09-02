@@ -1,0 +1,15 @@
+# Does the scenario survive with Space Age, quality and elevated rails enabled?
+# It is written for the base game; this establishes whether the DLC has to be
+# turned off for a playtest, rather than assuming either way.
+/silent-command rcon.print("PROBE mods sa="..tostring(script.active_mods["space-age"]).." q="..tostring(script.active_mods["quality"]).." er="..tostring(script.active_mods["elevated-rails"]))
+/silent-command rcon.print("PROBE surfaces="..(function() local n={} for _,s in pairs(game.surfaces) do n[#n+1]=s.name end return table.concat(n,",") end)())
+/tax-selftest
+/tax-cycle 3
+/tax-demand 3
+/tax-train
+/tax-arrive
+/tax-fill 1
+/tax-settle
+/tax-status
+/silent-command rcon.print(storage.taxes and storage.taxes.stats.paid>0 and "OK dlc-full-cycle" or "FAIL dlc-cycle-broken")
+/tax-attack 1

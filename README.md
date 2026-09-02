@@ -15,7 +15,10 @@ researched advanced circuits, the taxman stops asking for iron plates and starts
 asking for red chips.
 
 * Factorio version: **2.0.77**
-* DLC required: **none**. No Space Age, no elevated rails, no quality.
+* DLC required: **none**. It targets the base game and uses no Space Age,
+  elevated rail, or quality prototypes. It has also been verified to run
+  correctly with all three of those enabled, so you do not have to turn the DLC
+  off to play it.
 * Delivery: a **scenario**, so it is server-side only and clients download nothing.
 
 ## Installing
