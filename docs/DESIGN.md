@@ -72,10 +72,12 @@ storage.taxes = {
 Built once in `on_init`, and re-verified on load.
 
 * Surface: `nauvis` (`config.SURFACE_NAME`).
-* A single **straight, horizontal** rail line at `y = config.RAIL_Y` (default `-32`,
+* A single **straight, horizontal** rail line at `y = config.RAIL_Y` (default `-31`,
   north of spawn). No curves — this keeps train pathing trivially solvable.
-* `straight-rail` is a 2x2 entity, so place on even tile coordinates, stepping by 2
-  from `-config.RAIL_HALF_LENGTH` to `+config.RAIL_HALF_LENGTH`.
+* `straight-rail` is a 2x2 entity and snaps to ODD tile coordinates (see
+  docs/API_NOTES.md), so build directly on the odd grid: `x` from
+  `-config.RAIL_HALF_LENGTH + 1` to `config.RAIL_HALF_LENGTH - 1` step 2, at
+  `y = config.RAIL_Y`, which is itself odd.
 * Corridor preparation, before placing rail: within `±config.CORRIDOR_HALF_WIDTH`
   tiles of the line, replace water and other non-buildable tiles with `grass-1`
   via `surface.set_tiles`, and `destroy()` every tree, rock, and cliff.
@@ -135,7 +137,7 @@ Selection at the start of each cycle:
 Derived from the demand, so the train is exactly as long as it needs to be.
 
 * Item entries: `stacks = ceil(count / stack_size)`; a `cargo-wagon` holds 40 slots.
-* Fluid entries: a `fluid-wagon` holds 25 000 units; one wagon per fluid entry, more
+* Fluid entries: a `fluid-wagon` holds 50 000 units; one wagon per fluid entry, more
   if the demand exceeds capacity.
 * `wagons = ceil(total_item_stacks / 40) + fluid_wagons`, at least 1.
 * `locomotives = max(1, ceil(wagons / 4))`, placed at the front.
@@ -196,7 +198,7 @@ Every tunable lives in `scripts/config.lua`. Defaults:
 | `TIER_BIAS` | `2.5` | Exponent biasing selection toward higher tiers |
 | `TIER_WINDOW` | `1` | How many tiers below the top stay eligible |
 | `MAX_DEMAND_TYPES` | `4` | Cap on distinct demanded items per cycle |
-| `RAIL_Y` | `-32` | Rail line offset from spawn |
+| `RAIL_Y` | `-31` | Rail line offset from spawn |
 | `RAIL_HALF_LENGTH` | `120` | Half the rail line length, in tiles |
 | `BASE_WAVE` | `12` | Units in a fully unpaid wave at cycle 0 |
 | `MAX_WAVE` | `200` | Hard cap on wave size |

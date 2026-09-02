@@ -25,7 +25,7 @@ local config = {
   -- Infrastructure -----------------------------------------------------------
   SURFACE_NAME         = "nauvis",
   STATION_NAME         = "Tax Station",
-  RAIL_Y               = -32, -- rail line offset north of spawn
+  RAIL_Y               = -31, -- rail line offset north of spawn; must be ODD (rails snap to the odd grid)
   RAIL_HALF_LENGTH     = 120, -- half the length of the line, in tiles
   CORRIDOR_HALF_WIDTH  = 6,   -- tiles cleared and levelled either side of the line
   CHART_RADIUS         = 96,  -- radius charted for the player force at map start
@@ -33,7 +33,7 @@ local config = {
 
   -- Rolling stock ------------------------------------------------------------
   CARGO_WAGON_SLOTS    = 40,
-  FLUID_WAGON_CAPACITY = 25000,
+  FLUID_WAGON_CAPACITY = 50000,
   WAGONS_PER_LOCO      = 4,
 
   -- Punishment ---------------------------------------------------------------
