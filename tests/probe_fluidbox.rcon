@@ -1,0 +1,8 @@
+/silent-command local s=game.surfaces.nauvis; storage.taxes.demand={{kind="fluid",name="water",count=25000,delivered=0}}; rcon.print("PROBE set")
+/tax-train
+/tax-arrive
+/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}[1]; rcon.print("PROBE fw="..tostring(fw~=nil).." fluidbox="..type(fw and fw.fluidbox).." n="..tostring(fw and #fw.fluidbox))
+/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}[1]; local fb=fw.fluidbox; rcon.print("PROBE get_filter="..type(fb.get_filter).." set_filter="..type(fb.set_filter).." get_locked_fluid="..type(fb.get_locked_fluid))
+/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}[1]; local ok,res=pcall(function() return fw.fluidbox.get_filter(1) end); rcon.print("PROBE get_filter(1) ok="..tostring(ok).." val="..(ok and (res and helpers.table_to_json(res) or "nil") or tostring(res)))
+/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}[1]; local ok,err=pcall(function() fw.fluidbox.set_filter(1,{name="water"}) end); rcon.print("PROBE set_filter ok="..tostring(ok).." err="..tostring(err))
+/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}[1]; local ok,res=pcall(function() return fw.fluidbox.get_filter(1) end); rcon.print("PROBE after-set ok="..tostring(ok).." val="..(ok and (res and helpers.table_to_json(res) or "nil") or tostring(res)))

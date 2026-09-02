@@ -1,0 +1,11 @@
+# Can a fluid wagon be bound to one fluid by seeding it with a trace amount?
+# The engine refuses to mix two fluids in one container, so a seeded wagon
+# should reject any other fluid.
+/silent-command local f=game.forces.player; for _,t in pairs({"fluid-handling","oil-gathering","oil-processing","advanced-oil-processing"}) do if f.technologies[t] then f.technologies[t].researched=true end end; storage.taxes.demand={{kind="fluid",name="light-oil",count=20000,delivered=0},{kind="fluid",name="heavy-oil",count=20000,delivered=0}}; rcon.print("PROBE ready")
+/tax-train
+/tax-arrive
+/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}; rcon.print("PROBE fluid-wagons="..#fw)
+/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}; if fw[1] then fw[1].insert_fluid{name="light-oil",amount=1} end; if fw[2] then fw[2].insert_fluid{name="heavy-oil",amount=1} end; rcon.print("PROBE seeded a="..tostring(fw[1] and fw[1].get_fluid_count("light-oil")).." b="..tostring(fw[2] and fw[2].get_fluid_count("heavy-oil")))
+/silent-command local s=game.surfaces.nauvis; local fw=s.find_entities_filtered{name="fluid-wagon"}; local w=fw[1]; local before=w.get_fluid_count("light-oil"); w.insert_fluid{name="heavy-oil",amount=5000}; local wrong=w.get_fluid_count("heavy-oil"); rcon.print(wrong==0 and ("OK seeded-wagon-rejects-other-fluid (kept "..math.floor(before).." light-oil)") or ("FAIL accepted heavy-oil="..wrong))
+/silent-command local s=game.surfaces.nauvis; local w=s.find_entities_filtered{name="fluid-wagon"}[1]; w.insert_fluid{name="light-oil",amount=19999}; rcon.print("PROBE correct-fluid-accepted="..math.floor(w.get_fluid_count("light-oil")))
+/silent-command local s=game.surfaces.nauvis; local w=s.find_entities_filtered{name="fluid-wagon"}[1]; rcon.print("PROBE capacity="..tostring(w.prototype.fluid_capacity))

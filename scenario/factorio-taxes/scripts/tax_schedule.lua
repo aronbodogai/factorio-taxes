@@ -68,7 +68,29 @@ end
 --- away, and count the cycle as done.
 function tax_schedule.settle()
   local state = storage.taxes
+
+  -- train_manager.settle is idempotent, but the bookkeeping around it is not.
+  -- /tax-settle is a debug command a tester will run twice, and without this a
+  -- second call would count the cycle again, re-announce the result, and fire a
+  -- second wave. train_manager marks each entry as it settles it, so a demand
+  -- whose entries are all marked has already been paid up.
+  local already_settled = #state.demand > 0
+  for _, entry in pairs(state.demand) do
+    if not entry.settled then
+      already_settled = false
+      break
+    end
+  end
+  if already_settled then
+    train_manager.depart()
+    enter("departing", config.DEPART_TIMEOUT)
+    return
+  end
+
   local shortfall = train_manager.settle(state.demand) or 0
+  -- Recorded so the settlement can be asserted directly rather than inferred
+  -- from the size of the wave it produced.
+  state.stats.last_shortfall = shortfall
 
   if shortfall <= 0 then
     state.stats.paid = state.stats.paid + 1

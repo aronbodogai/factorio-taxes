@@ -31,8 +31,9 @@ local function default_state()
       loco_unit_numbers = {},
       wagon_unit_numbers = {},
       train_id = nil,
+      departing = false,
     },
-    stats = { paid = 0, missed = 0, waves = 0 },
+    stats = { paid = 0, missed = 0, waves = 0, last_shortfall = 0 },
   }
 end
 

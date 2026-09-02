@@ -46,8 +46,8 @@ storage.taxes = {
   cycle             = 0,        -- number of settled cycles
   phase             = "cooldown",
   phase_end_tick    = 0,        -- tick at which the current phase expires
-  demand            = {         -- array, current cycle's demand
-    { kind = "item", name = "iron-plate", count = 100, delivered = 0 },
+  demand            = {         -- array, current cycle demand
+    { kind = "item", name = "iron-plate", count = 100, delivered = 0, settled = false },
   },
   infra = {
     surface_index    = 1,
@@ -61,9 +61,10 @@ storage.taxes = {
   train = {
     loco_unit_numbers  = {},
     wagon_unit_numbers = {},    -- cargo and fluid wagons, in order
-    train_id           = nil,   -- LuaTrain.id
+    train_id           = nil,   -- LuaTrain.id, refreshed if a split changes it
+    departing          = false, -- set while a hand-pushed train still needs nudging
   },
-  stats = { paid = 0, missed = 0, waves = 0 },
+  stats = { paid = 0, missed = 0, waves = 0, last_shortfall = 0 },
 }
 ```
 

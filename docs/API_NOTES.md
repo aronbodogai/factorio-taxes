@@ -157,3 +157,25 @@ harness: plain freeplay generates 400 chunks and this scenario also generates
 400, so the rail corridor now costs nothing over vanilla. To reproduce the
 baseline, copy `data/base/scenarios/freeplay` into the server's `scenarios/`
 directory and run the harness with `SCENARIO=vanilla-freeplay`.
+
+## Fluid wagons cannot be filtered, but they can be locked
+
+A `fluid-wagon` has NO indexable fluid box. `#wagon.fluidbox` is `0`, and both
+`wagon.fluidbox.get_filter(1)` and `wagon.fluidbox.set_filter(1, {name="water"})`
+fail with `Passed index is out of range.` The methods exist; there is nothing to
+index. So the cargo-wagon trick of filtering every slot has no fluid equivalent.
+
+What does work is seeding. The engine refuses to mix two fluids in one
+container, so a wagon holding a trace of fluid A is bound to fluid A. Measured
+with `tests/probe_fluid_lock.rcon`:
+
+```
+insert 1 light-oil into wagon A, 1 heavy-oil into wagon B
+insert 5000 heavy-oil into wagon A  --> rejected, heavy-oil count stays 0,
+                                        the 1 light-oil is retained
+insert 19999 light-oil into wagon A --> accepted, total exactly 20000
+```
+
+`wagon.insert_fluid{name=, amount=}` and `wagon.get_fluid_count(name)` both work
+regardless, which is how the contents of a fluid wagon are read and written.
+Capacity reads back as `50000` from `wagon.prototype.fluid_capacity`.

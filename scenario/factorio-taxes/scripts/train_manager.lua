@@ -13,12 +13,18 @@ local rail_infra = require("scripts.rail_infra")
 local train_manager = {}
 
 -- Rolling stock is 6 tiles long and needs a 1 tile coupling gap, so consecutive
--- stock centres sit 7 tiles apart. That is arithmetic rather than something the
--- headless probes confirmed, so placement retries at the wider spacings before
--- giving up; a wider spacing leaves the stock uncoupled but still recoverable,
--- which beats failing to spawn a train at all.
-local SPACINGS = { 7, 8, 9, 10 }
-local STOCK_SPACING = SPACINGS[1]
+-- stock centres sit 7 tiles apart. The headless probe confirms it: five stock
+-- placed at this spacing read back as one train of five carriages. Coupling
+-- happens at exactly this distance and nowhere else, so there is no wider
+-- spacing to fall back to - retrying at 8, 9 or 10 would not "nearly" couple,
+-- it would produce one single car train per stock. A blocked position is
+-- retried from an origin shifted along the line instead.
+local STOCK_SPACING = 7
+
+-- Offsets, in tiles, applied to the whole layout when a position is blocked.
+-- Kept small and even so the train stays on the rails' parity and a train
+-- placed at the station is still within STATION_TOLERANCE of the stop.
+local PLACEMENT_SHIFTS = { 0, 2, -2, 4, -4 }
 
 -- A train stopped at an east facing stop lines its leading edge up with the stop
 -- marker, so the leading stock centre sits half a stock length west of it.
@@ -66,6 +72,10 @@ local function ensure_state()
   taxes.train = taxes.train or {}
   taxes.train.loco_unit_numbers = taxes.train.loco_unit_numbers or {}
   taxes.train.wagon_unit_numbers = taxes.train.wagon_unit_numbers or {}
+  -- departing is this module's own field and postdates the first saves, so a
+  -- load from an older revision arrives without it. Normalising it here is what
+  -- lets every read treat it as a plain boolean.
+  if taxes.train.departing == nil then taxes.train.departing = false end
   return taxes
 end
 
@@ -169,13 +179,31 @@ local function resolve()
   if not (surface and surface.valid) then return cache.locos, cache.wagons end
 
   local by_unit = scan_stock(surface)
-  for _, unit_number in ipairs(record.loco_unit_numbers) do
-    local entity = by_unit[unit_number]
-    if entity then cache.locos[#cache.locos + 1] = entity end
+
+  -- A unit number that nothing on the surface answers to is gone for good: the
+  -- entity was destroyed, or a save was edited. Leaving it in the record would
+  -- keep cache_matches false forever, and that turns this function into an
+  -- unfiltered whole-surface search for every piece of rolling stock in the
+  -- game, once per tick, for the rest of the phase. So an unresolvable record
+  -- prunes itself and the cache is allowed to settle.
+  local dropped = 0
+  for _, field in ipairs({ "loco_unit_numbers", "wagon_unit_numbers" }) do
+    local resolved = field == "loco_unit_numbers" and cache.locos or cache.wagons
+    local kept = {}
+    for _, unit_number in ipairs(record[field]) do
+      local entity = by_unit[unit_number]
+      if entity then
+        resolved[#resolved + 1] = entity
+        kept[#kept + 1] = unit_number
+      else
+        dropped = dropped + 1
+      end
+    end
+    record[field] = kept
   end
-  for _, unit_number in ipairs(record.wagon_unit_numbers) do
-    local entity = by_unit[unit_number]
-    if entity then cache.wagons[#cache.wagons + 1] = entity end
+
+  if dropped > 0 then
+    log("[taxes] " .. dropped .. " piece(s) of tax rolling stock no longer exist; forgetting them")
   end
   return cache.locos, cache.wagons
 end
@@ -184,12 +212,22 @@ end
 --- entity rather than through the stored id, because an entity reference stays
 --- authoritative even if the train was split and renumbered.
 local function get_train()
+  local taxes = ensure_state()
   local locos, wagons = resolve()
   for _, list in ipairs({ locos, wagons }) do
     for _, entity in ipairs(list) do
       if entity.valid then
         local ok, train = pcall(function() return entity.train end)
-        if ok and train and train.valid then return train end
+        if ok and train and train.valid then
+          -- The schema owns train_id, and a train that was split and recoupled
+          -- comes back under a new one, so keep the record honest here rather
+          -- than leaving a stale id in the save for a later reader to trust.
+          local got, id = pcall(function() return train.id end)
+          if taxes and got and taxes.train.train_id ~= id then
+            taxes.train.train_id = id
+          end
+          return train
+        end
       end
     end
   end
@@ -205,6 +243,46 @@ local function is_fluid_entry(entry)
   if entry.kind == "item" then return false end
   local ok, proto = pcall(function() return prototypes.fluid[entry.name] end)
   return ok and proto ~= nil
+end
+
+--- The usable entries of a demand, in order. A demand is an array (DESIGN
+--- section 3) and ordered iteration is what lets the composition, the fluid
+--- wagon filters and insert() agree on which wagon belongs to which entry, so
+--- this deliberately walks it with ipairs rather than pairs.
+local function demand_entries(demand)
+  local entries = {}
+  if type(demand) ~= "table" then return entries end
+  for _, entry in ipairs(demand) do
+    if type(entry) == "table" and type(entry.name) == "string"
+        and (tonumber(entry.count) or 0) > 0 then
+      entries[#entries + 1] = entry
+    end
+  end
+  return entries
+end
+
+--- Which demanded fluid each fluid wagon belongs to, front to back: every fluid
+--- entry claims as many consecutive wagons as its volume needs, and no wagon is
+--- ever shared. This is the single source of truth for the assignment, so the
+--- wagon a fluid is budgeted for, the wagon the engine filters for it, and the
+--- wagon insert() puts it in cannot drift apart.
+-- @param limit number|nil stop after this many wagons, for when the train that
+--   was actually built is shorter than the one the demand asked for
+local function fluid_wagon_names(demand, limit)
+  local names = {}
+  for _, entry in ipairs(demand_entries(demand)) do
+    if is_fluid_entry(entry) then
+      local count = tonumber(entry.count) or 0
+      -- A fluid wagon cannot mix two fluids, so every distinct fluid entry
+      -- claims a wagon of its own before capacity is considered at all.
+      local needed = math.max(1, math.ceil(count / config.FLUID_WAGON_CAPACITY))
+      for _ = 1, needed do
+        if limit and #names >= limit then return names end
+        names[#names + 1] = entry.name
+      end
+    end
+  end
+  return names
 end
 
 --- Spread `slots` filter slots over the demanded items by largest remainder, so
@@ -260,43 +338,22 @@ local function allocate_slots(items, total_stacks, slots)
   return allocation
 end
 
---- Work out the train a demand needs. Safe to call with nil, an empty table or
---- a partially filled demand; it always returns a usable composition.
--- @return table { locomotives, cargo_wagons, fluid_wagons, wagons, filters }
---   where filters is one item name per cargo wagon slot, front wagon first.
-function train_manager.compose(demand)
-  local items, total_stacks, fluid_wagons = {}, 0, 0
-
-  if type(demand) == "table" then
-    for _, entry in pairs(demand) do
-      if type(entry) == "table" and type(entry.name) == "string" then
-        local count = tonumber(entry.count) or 0
-        if count > 0 then
-          if is_fluid_entry(entry) then
-            -- A fluid wagon cannot mix two fluids, so every distinct fluid entry
-            -- claims a wagon of its own before capacity is considered at all.
-            fluid_wagons = fluid_wagons + math.max(1, math.ceil(count / config.FLUID_WAGON_CAPACITY))
-          else
-            local stacks = math.max(1, math.ceil(count / util.stack_size(entry.name)))
-            items[#items + 1] = { name = entry.name, stacks = stacks }
-            total_stacks = total_stacks + stacks
-          end
-        end
-      end
-    end
-  end
-
-  local cargo_wagons = math.ceil(total_stacks / config.CARGO_WAGON_SLOTS)
-  if cargo_wagons + fluid_wagons < 1 then
-    -- An empty or unreadable demand still gets a one wagon train so the rest of
-    -- the cycle has something to drive to the station.
-    cargo_wagons = 1
-  end
+--- Re-derive everything that follows from the wagon counts: the fluid wagon
+--- total, the locomotive count, and the cargo slot filters. compose() calls it
+--- once and every trim calls it again, so a shortened train gets filters sized
+--- for the wagons it actually has instead of a truncated copy of the filters
+--- the full length train would have had.
+local function refresh_composition(comp)
+  comp.fluid_filters = comp.fluid_filters or {}
+  comp.fluid_wagons = #comp.fluid_filters
+  comp.wagons = comp.cargo_wagons + comp.fluid_wagons
+  comp.locomotives = math.max(1, math.ceil(comp.wagons / config.WAGONS_PER_LOCO))
 
   local filters = {}
-  local slots = cargo_wagons * config.CARGO_WAGON_SLOTS
-  if #items > 0 and slots > 0 and total_stacks > 0 then
-    local allocation = allocate_slots(items, total_stacks, slots)
+  local items = comp.items or {}
+  local slots = comp.cargo_wagons * config.CARGO_WAGON_SLOTS
+  if #items > 0 and slots > 0 and (comp.total_stacks or 0) > 0 then
+    local allocation = allocate_slots(items, comp.total_stacks, slots)
     for index, item in ipairs(items) do
       for _ = 1, allocation[index] do filters[#filters + 1] = item.name end
     end
@@ -304,15 +361,45 @@ function train_manager.compose(demand)
     -- left unfiltered, so pad rather than trust the arithmetic above.
     while #filters < slots do filters[#filters + 1] = items[1].name end
   end
+  comp.filters = filters
+end
 
-  local wagons = cargo_wagons + fluid_wagons
-  return {
-    locomotives = math.max(1, math.ceil(wagons / config.WAGONS_PER_LOCO)),
+--- Work out the train a demand needs. Safe to call with nil, an empty table or
+--- a partially filled demand; it always returns a usable composition.
+-- @return table { locomotives, cargo_wagons, fluid_wagons, wagons, filters,
+--   fluid_filters, items, total_stacks } where filters is one item name per
+--   cargo wagon slot and fluid_filters one fluid name per fluid wagon, front
+--   wagon first in both cases.
+function train_manager.compose(demand)
+  local items, total_stacks = {}, 0
+
+  for _, entry in ipairs(demand_entries(demand)) do
+    if not is_fluid_entry(entry) then
+      local count = tonumber(entry.count) or 0
+      local stacks = math.max(1, math.ceil(count / util.stack_size(entry.name)))
+      items[#items + 1] = { name = entry.name, stacks = stacks }
+      total_stacks = total_stacks + stacks
+    end
+  end
+
+  local fluid_filters = fluid_wagon_names(demand, nil)
+  local cargo_wagons = math.ceil(total_stacks / config.CARGO_WAGON_SLOTS)
+  if cargo_wagons + #fluid_filters < 1 then
+    -- An empty or unreadable demand still gets a one wagon train so the rest of
+    -- the cycle has something to drive to the station.
+    cargo_wagons = 1
+  end
+
+  local comp = {
     cargo_wagons = cargo_wagons,
-    fluid_wagons = fluid_wagons,
-    wagons = wagons,
-    filters = filters,
+    fluid_filters = fluid_filters,
+    -- Kept on the composition so a trim can rebuild the slot filters, and so it
+    -- can tell whether the item half of the demand still has a wagon to go in.
+    items = items,
+    total_stacks = total_stacks,
   }
+  refresh_composition(comp)
+  return comp
 end
 
 -- Placement ------------------------------------------------------------------
@@ -326,6 +413,19 @@ local function stock_order(comp)
   for _ = 1, comp.cargo_wagons do order[#order + 1] = "cargo-wagon" end
   for _ = 1, comp.fluid_wagons do order[#order + 1] = "fluid-wagon" end
   return order
+end
+
+--- Remove stock we created but are not going to keep. Unprotecting first is
+--- what stops storage.taxes.infra.entities filling up with the unit numbers of
+--- entities that no longer exist, which would otherwise make util.is_tax_entity
+--- lie about whatever entity the engine hands that number to next.
+local function discard(entities)
+  for _, entity in ipairs(entities or {}) do
+    if entity and entity.valid then
+      pcall(util.unprotect, entity)
+      pcall(function() entity.destroy() end)
+    end
+  end
 end
 
 --- One placement attempt at a fixed spacing. All or nothing: a partial train
@@ -346,11 +446,9 @@ local function build_attempt(surface, force, order, front_x, y, spacing)
     if ok then entity = result end
 
     if not (entity and entity.valid) then
-      log(string.format("[taxes] could not place %s at %.1f,%.1f (spacing %d), retrying wider",
+      log(string.format("[taxes] could not place %s at %.1f,%.1f (spacing %d), retrying from a shifted origin",
         name, position.x, position.y, spacing))
-      for _, made in ipairs(created) do
-        if made.valid then made.destroy() end
-      end
+      discard(created)
       return nil
     end
     created[#created + 1] = entity
@@ -358,23 +456,79 @@ local function build_attempt(surface, force, order, front_x, y, spacing)
   return created
 end
 
---- Place a whole train, widening the stock spacing if the game refuses a
---- position. Returns the created entities front to back plus the spacing used,
---- or nil if every spacing failed.
+--- The single train every piece of created stock belongs to, or nil if it did
+--- not couple. Coupling is the entire reason the spacing is what it is, and it
+--- fails silently: the engine hands back one single car train per stock and
+--- every later call still works, so it is checked rather than assumed.
+local function coupled_train(created)
+  for _, entity in ipairs(created) do
+    if entity.valid then
+      local ok, train = pcall(function() return entity.train end)
+      if not (ok and train and train.valid) then return nil end
+
+      local counted, carriages = pcall(function() return train.carriages end)
+      if not (counted and type(carriages) == "table") then
+        -- The train exists but its carriage list cannot be read, so there is no
+        -- evidence either way. Refusing the train over an unreadable property
+        -- would cost the cycle its train for no reason; say so and accept it.
+        log("[taxes] could not read the carriage list, so the tax train's coupling is unverified")
+        return train
+      end
+
+      if #carriages < #created then
+        log(string.format("[taxes] tax stock did not couple: the train holds %d carriages, %d were placed",
+          #carriages, #created))
+        return nil
+      end
+      if #carriages > #created then
+        -- Stock that was already on the line coupled onto ours. Everything we
+        -- placed is still in one train, which is all this check is about.
+        log(string.format("[taxes] the tax train holds %d carriages but only %d of them are ours",
+          #carriages, #created))
+      end
+      return train
+    end
+  end
+  return nil
+end
+
+--- Place a whole train at the one spacing that couples, shifting the whole
+--- layout along the line if a position is blocked or the stock refuses to
+--- couple. Returns the created entities front to back plus the LuaTrain they
+--- form, or nil if no attempt produced a single coupled train.
 -- @param anchor_mode string "front" pins the leading stock at anchor_x,
 --   "tail" pins the last stock there so the train grows east from that point.
-local function build_train(surface, force, comp, anchor_mode, anchor_x, y)
+-- @param min_x number|nil westmost tile the tail may occupy
+-- @param max_x number|nil eastmost tile the front may occupy
+local function build_train(surface, force, comp, anchor_mode, anchor_x, y, min_x, max_x)
   local order = stock_order(comp)
-  for _, spacing in ipairs(SPACINGS) do
-    local front_x = anchor_x
-    if anchor_mode == "tail" then front_x = anchor_x + (#order - 1) * spacing end
-    local created = build_attempt(surface, force, order, math.floor(front_x + 0.5), y, spacing)
-    if created then
-      if spacing ~= STOCK_SPACING then
-        log("[taxes] tax train placed at fallback spacing " .. spacing ..
-          "; stock may not have coupled into a single train")
+  local length = (#order - 1) * STOCK_SPACING
+
+  for _, shift in ipairs(PLACEMENT_SHIFTS) do
+    local front_x = anchor_x + shift
+    if anchor_mode == "tail" then front_x = front_x + length end
+    local tail_x = front_x - length
+
+    -- A layout that runs off the end of the line cannot be placed at all, so do
+    -- not spend a create_entity call per stock proving it.
+    local in_bounds = (min_x == nil or tail_x >= min_x - 0.5)
+      and (max_x == nil or front_x <= max_x + 0.5)
+
+    if in_bounds then
+      local created = build_attempt(surface, force, order, math.floor(front_x + 0.5), y, STOCK_SPACING)
+      if created then
+        local train = coupled_train(created)
+        if train then
+          if shift ~= 0 then
+            log("[taxes] tax train placed " .. shift .. " tiles along the line from the ideal position")
+          end
+          return created, train
+        end
+        -- Uncoupled stock is worse than no stock: it cannot be driven, it
+        -- cannot be despawned as one train, and it would sit on the line
+        -- blocking the next cycle. Take it away before shifting and retrying.
+        discard(created)
       end
-      return created, spacing
     end
   end
   return nil
@@ -384,17 +538,54 @@ end
 --- to util.protect if that module is not loaded or rejects the call. Either way
 --- the entity ends up recorded in storage.taxes.infra.entities.
 local function protect(entity, operable)
-  local ok = pcall(rail_infra.protect_entity, entity, operable)
-  if not ok then util.protect(entity, operable) end
+  if not (entity and entity.valid) then return end
+  if pcall(rail_infra.protect_entity, entity, operable) then return end
+
+  -- rail_infra.protect_entity is a thin wrapper over util.protect, so the
+  -- fallback is the very call that just failed and can fail the same way. This
+  -- runs inside on_tick, where an error takes the whole game down, so guard it
+  -- and carry on with an unprotected entity rather than raising.
+  if not pcall(util.protect, entity, operable) then
+    log("[taxes] could not protect a piece of tax rolling stock; it stays mutable for this cycle")
+  end
 end
 
---- Filter every slot of every cargo wagon. Each set_filter is guarded on its own
---- so one bad prototype name cannot leave the rest of the train wide open.
-local function apply_filters(wagons, filters)
-  if type(filters) ~= "table" or #filters == 0 then return end
-  local cursor = 1
+--- Bind a fluid wagon to one fluid at the engine level, so the wrong fluid is
+--- refused outright rather than merely going unaccounted for. Every tank of the
+--- wagon is filtered, because the prototype is free to declare more than one.
+-- @return boolean whether the engine accepted the filter
+local function set_fluid_filter(wagon, name)
+  local ok, applied = pcall(function()
+    local box = wagon.fluidbox
+    local count = 0
+    for index = 1, #box do
+      if box.set_filter(index, { name = name }) then count = count + 1 end
+    end
+    return count
+  end)
+  if ok and type(applied) == "number" and applied > 0 then return true end
+
+  log("[taxes] could not filter a fluid wagon to " .. tostring(name)
+    .. "; insert() still honours the assignment but the engine will not enforce it")
+  return false
+end
+
+--- Filter the wagons so the tax can only be paid in the demanded currency:
+--- every cargo slot to a demanded item, and every fluid wagon to exactly one
+--- demanded fluid. Each call is guarded on its own so one bad prototype name
+--- cannot leave the rest of the train wide open.
+---
+--- The fluid half matters as much as the cargo half. A late game demand
+--- routinely names two fluids - light oil, heavy oil and lubricant are all tier
+--- 6 - and with no filter a player who pumps the first fluid into every wagon
+--- makes the second physically undeliverable and is punished for it.
+local function apply_filters(wagons, filters, fluid_filters)
+  filters = type(filters) == "table" and filters or {}
+  fluid_filters = type(fluid_filters) == "table" and fluid_filters or {}
+
+  local cursor, fluid_index = 1, 0
   for _, wagon in ipairs(wagons) do
-    if wagon.valid and wagon.name == "cargo-wagon" then
+    if wagon.valid and wagon.name == "cargo-wagon" and #filters > 0 then
       local ok, inventory = pcall(function()
         return wagon.get_inventory(defines.inventory.cargo_wagon)
       end)
@@ -408,6 +599,12 @@ local function apply_filters(wagons, filters)
           pcall(function() inventory.set_filter(slot, name) end)
         end
       end
+    elseif wagon.valid and wagon.name == "fluid-wagon" then
+      -- Wagons are created in composition order, so the nth fluid wagon takes
+      -- the nth name of the assignment fluid_wagon_names() built.
+      fluid_index = fluid_index + 1
+      local name = fluid_filters[fluid_index]
+      if name then set_fluid_filter(wagon, name) end
     end
   end
 end
@@ -433,8 +630,10 @@ local function set_station_schedule(train)
 end
 
 --- Protect, filter, schedule and record a freshly built train.
--- @return LuaTrain|nil
-local function commission(taxes, comp, created)
+-- @param train LuaTrain|nil the coupled train build_train() resolved
+-- @return LuaTrain|nil nil when the train could not be recorded, in which case
+--   nothing of it is left on the map
+local function commission(taxes, comp, created, train)
   local locos, wagons = {}, {}
   for index, entity in ipairs(created) do
     if index <= comp.locomotives then
@@ -448,29 +647,46 @@ local function commission(taxes, comp, created)
     end
   end
 
-  apply_filters(wagons, comp.filters)
+  apply_filters(wagons, comp.filters, comp.fluid_filters)
 
-  local train = nil
-  for _, entity in ipairs(locos) do
-    if entity.valid then
-      local ok, resolved = pcall(function() return entity.train end)
-      if ok and resolved and resolved.valid then
-        train = resolved
-        break
-      end
-    end
-  end
-
+  if not (train and train.valid) then train = coupled_train(created) end
   set_station_schedule(train)
 
+  -- unit_number raises on a dead entity, and this runs inside on_tick where a
+  -- raised error takes the whole game down, which is exactly what this file's
+  -- header promises never to do. Stock that cannot be recorded cannot be
+  -- tracked, despawned or protected either, so the commission is abandoned
+  -- whole rather than left half done with orphans on the line.
   local loco_unit_numbers, wagon_unit_numbers = {}, {}
-  for _, entity in ipairs(locos) do loco_unit_numbers[#loco_unit_numbers + 1] = entity.unit_number end
-  for _, entity in ipairs(wagons) do wagon_unit_numbers[#wagon_unit_numbers + 1] = entity.unit_number end
+  local recorded = pcall(function()
+    for _, entity in ipairs(locos) do loco_unit_numbers[#loco_unit_numbers + 1] = entity.unit_number end
+    for _, entity in ipairs(wagons) do wagon_unit_numbers[#wagon_unit_numbers + 1] = entity.unit_number end
+  end)
+
+  if not (recorded and #loco_unit_numbers == #locos and #wagon_unit_numbers == #wagons
+      and #loco_unit_numbers > 0) then
+    log("[taxes] the tax train could not be recorded in state; removing it rather than "
+      .. "leaving untracked stock on the line")
+    discard(created)
+    taxes.train = {
+      loco_unit_numbers = {},
+      wagon_unit_numbers = {},
+      train_id = nil,
+      departing = false,
+    }
+    cache.locos, cache.wagons, cache.scanned_tick = {}, {}, nil
+    return nil
+  end
+
+  -- id on a dead LuaTrain raises like any other property read, so it goes
+  -- through a pcall as well; a missing id costs nothing, get_train() fills it
+  -- back in the first time it resolves the train.
+  local got_id, train_id = pcall(function() return train and train.valid and train.id or nil end)
 
   taxes.train = {
     loco_unit_numbers = loco_unit_numbers,
     wagon_unit_numbers = wagon_unit_numbers,
-    train_id = train and train.id or nil,
+    train_id = got_id and train_id or nil,
     -- Module private: set once depart() has released the train eastwards, so
     -- check_despawn knows a hand pushed train still needs nudging.
     departing = false,
@@ -480,34 +696,84 @@ local function commission(taxes, comp, created)
   return train
 end
 
---- Trim a composition so the train physically fits between the two ends of the
---- line. This should never fire with the shipped config; it exists because a
---- server owner can shorten RAIL_HALF_LENGTH without touching the demand caps.
-local function fit_to_line(comp, west, east)
-  local span = math.abs(east.x - west.x) - config.DESPAWN_RADIUS
-  local capacity = math.floor(span / STOCK_SPACING)
+--- How many pieces of stock fit in a span of `span` tiles. Only the gaps
+--- between stock cost a spacing, the first one costs nothing, hence the +1.
+local function stock_capacity(span, spacing)
+  if span < 0 then span = 0 end
+  local capacity = math.floor(span / spacing) + 1
+  -- One locomotive and one wagon is the shortest train that is any use. A line
+  -- with no room even for that is a broken config, and a two stock train that
+  -- overhangs slightly is still far better for the cycle than no train at all.
   if capacity < 2 then capacity = 2 end
+  return capacity
+end
 
+--- Drop one fluid wagon, taking it from whichever fluid has the most wagons, so
+--- a fluid never loses its last wagon while another still has a spare.
+-- @return boolean whether a wagon was actually dropped
+local function drop_fluid_wagon(comp)
+  local names = comp.fluid_filters or {}
+  if #names == 0 then return false end
+
+  local counts = {}
+  for _, name in ipairs(names) do counts[name] = (counts[name] or 0) + 1 end
+
+  local victim, most = nil, 0
+  for index = #names, 1, -1 do
+    local count = counts[names[index]]
+    if count > most then victim, most = index, count end
+  end
+  if not victim then return false end
+
+  table.remove(names, victim)
+  return true
+end
+
+--- Trim a composition so the train physically fits the stretch of line it has.
+--- This should never fire with the shipped config for a spawn; the failsafe
+--- placement at the station has far less line to work with and does rely on it.
+local function trim_to_capacity(comp, capacity)
   local total = comp.locomotives + comp.wagons
   if total <= capacity then return comp end
 
-  log("[taxes] tax train of " .. total .. " stock does not fit a " .. math.floor(span) ..
-    " tile line, trimming to " .. capacity)
+  log("[taxes] a tax train of " .. total .. " stock does not fit the " .. capacity
+    .. " stock the line has room for, trimming it")
 
-  -- Drop wagons from the back, fluid first, until the whole train fits. The
-  -- locomotive count is re-derived because it depends on the wagon count.
-  while comp.locomotives + comp.wagons > capacity and comp.wagons > 1 do
-    if comp.fluid_wagons > 0 then
-      comp.fluid_wagons = comp.fluid_wagons - 1
-    else
-      comp.cargo_wagons = comp.cargo_wagons - 1
+  -- The item half of the demand needs somewhere to go: trimming the last cargo
+  -- wagon away deletes every slot filter with it and leaves the demanded items
+  -- physically unpayable, which then punishes the player for a config problem.
+  local min_cargo = (#(comp.items or {}) > 0) and 1 or 0
+
+  -- How many wagons the fluids need to keep one each. Anything above that is a
+  -- second wagon for a single fluid, which can be given up first because that
+  -- fluid is then only part payable rather than not payable at all.
+  local distinct_fluids = 0
+  local seen = {}
+  for _, name in ipairs(comp.fluid_filters or {}) do
+    if not seen[name] then
+      seen[name] = true
+      distinct_fluids = distinct_fluids + 1
     end
-    comp.wagons = comp.cargo_wagons + comp.fluid_wagons
-    comp.locomotives = math.max(1, math.ceil(comp.wagons / config.WAGONS_PER_LOCO))
   end
 
-  local slots = comp.cargo_wagons * config.CARGO_WAGON_SLOTS
-  while #comp.filters > slots do comp.filters[#comp.filters] = nil end
+  while comp.locomotives + comp.wagons > capacity and comp.wagons > 1 do
+    local dropped = false
+    if comp.fluid_wagons > distinct_fluids then
+      dropped = drop_fluid_wagon(comp)
+    elseif comp.cargo_wagons > min_cargo then
+      comp.cargo_wagons = comp.cargo_wagons - 1
+      dropped = true
+    else
+      -- Everything above the floors is gone, so a fluid does have to lose its
+      -- only wagon now; that is still better than an unplaceable train.
+      dropped = drop_fluid_wagon(comp)
+      if dropped then distinct_fluids = math.max(0, distinct_fluids - 1) end
+    end
+    if not dropped then break end
+    refresh_composition(comp)
+  end
+
+  refresh_composition(comp)
   return comp
 end
 
@@ -535,16 +801,26 @@ function train_manager.spawn(demand)
   end
 
   local west, east = west_end(), east_end()
-  local comp = fit_to_line(train_manager.compose(demand or taxes.demand), west, east)
+  -- The train is assembled eastwards from the west end and has to come to a
+  -- stand before the despawn ring at the far end, so that stretch, not the
+  -- whole line, is the room it has.
+  local comp = trim_to_capacity(train_manager.compose(demand or taxes.demand),
+    stock_capacity(math.abs(east.x - west.x) - config.DESPAWN_RADIUS, STOCK_SPACING))
 
-  local created = build_train(surface, util.player_force(), comp, "tail", west.x, west.y)
+  local created, placed = build_train(surface, util.player_force(), comp, "tail",
+    west.x, west.y, west.x, east.x)
   if not created then
-    log("[taxes] tax train could not be placed at any spacing near " .. west.x .. "," .. west.y)
+    log("[taxes] tax train could not be placed or coupled anywhere near " .. west.x .. "," .. west.y)
     util.announce({ "taxes.train-spawn-failed" })
     return nil
   end
 
-  local train = commission(taxes, comp, created)
+  local train = commission(taxes, comp, created, placed)
+  if not train then
+    util.announce({ "taxes.train-spawn-failed" })
+    return nil
+  end
+
   util.announce({ "taxes.train-arriving", comp.locomotives, comp.cargo_wagons, comp.fluid_wagons },
     "utility/new_objective")
   return train
@@ -613,20 +889,48 @@ function train_manager.force_to_station()
   pcall(rail_infra.ensure)
 
   local west, east = west_end(), east_end()
-  local comp = fit_to_line(train_manager.compose(taxes.demand), west, east)
 
   -- The stop sits beside the line, so the train goes on the rail's y, not the
   -- stop's. Anchoring the leading stock a half stock length west of the marker
   -- puts it where the automatic driver would have parked it anyway.
-  local created = build_train(surface, util.player_force(), comp, "front",
-    position.x - STOP_FRONT_OFFSET, west.y)
+  local front_x = position.x - STOP_FRONT_OFFSET
+
+  -- Everything behind that leading stock grows WEST, so the line between the
+  -- station and the west end is the only room this placement has: with the
+  -- shipped geometry that is about sixteen stock, and a late cycle train is
+  -- longer than that. Putting its tail past the end of the rail used to fail
+  -- every attempt and return nil, which left the cycle with no train at all,
+  -- settled as a total shortfall and fired a full wave for it. So clamp to what
+  -- the rail can actually carry and place a shorter train instead.
+  local comp = trim_to_capacity(train_manager.compose(taxes.demand),
+    stock_capacity(front_x - west.x, STOCK_SPACING))
+
+  local created, placed = build_train(surface, util.player_force(), comp, "front",
+    front_x, west.y, west.x, east.x)
+
   if not created then
-    log("[taxes] force_to_station could not place a train at the station")
+    -- This is the failsafe, so it must not fail quietly itself. Fall back to
+    -- the shortest train that is any use, which needs two stock lengths of
+    -- clear line and nothing else.
+    log("[taxes] force_to_station could not place a " .. (comp.locomotives + comp.wagons)
+      .. " stock train at the station; falling back to the shortest possible one")
+    comp = trim_to_capacity(train_manager.compose(taxes.demand), 2)
+    created, placed = build_train(surface, util.player_force(), comp, "front",
+      front_x, west.y, west.x, east.x)
+  end
+
+  if not created then
+    log("[taxes] force_to_station could not place a train at the station at all")
     util.announce({ "taxes.train-spawn-failed" })
     return nil
   end
 
-  local train = commission(taxes, comp, created)
+  local train = commission(taxes, comp, created, placed)
+  if not train then
+    util.announce({ "taxes.train-spawn-failed" })
+    return nil
+  end
+
   util.announce({ "taxes.train-forced" })
   return train
 end
@@ -693,7 +997,87 @@ local function take_item(wagons, name, wanted)
   return taken
 end
 
---- Take up to `wanted` of a fluid out of the fluid wagons.
+--- The fluid wagons of a train, in the order they were recorded, which is the
+--- order fluid_wagon_names() assigns fluids in.
+local function fluid_wagons_of(wagons)
+  local list = {}
+  for _, wagon in ipairs(wagons) do
+    if wagon.valid and wagon.name == "fluid-wagon" then list[#list + 1] = wagon end
+  end
+  return list
+end
+
+--- How much fluid a wagon is already holding, in units. Needed because
+--- insert_fluid knows the wagon's capacity but not what an earlier call already
+--- put in, and the room left is the difference.
+local function fluid_level(wagon)
+  local ok, fluids = pcall(function() return wagon.get_fluid_contents() end)
+  if not (ok and type(fluids) == "table") then return 0 end
+
+  local total = 0
+  for _, amount in pairs(fluids) do
+    if type(amount) == "number" then total = total + amount end
+  end
+  return total
+end
+
+--- Which fluid a wagon is bound to: the fluidbox filter commissioning set if the
+--- engine took one, otherwise whatever it already holds, otherwise nil for a
+--- wagon nothing has claimed yet.
+local function wagon_fluid(wagon)
+  local ok, filtered = pcall(function()
+    local box = wagon.fluidbox
+    for index = 1, #box do
+      local filter = box.get_filter(index)
+      if filter and type(filter.name) == "string" then return filter.name end
+    end
+    return nil
+  end)
+  if ok and type(filtered) == "string" then return filtered end
+
+  -- A wagon with fluid in it and no readable filter is still spoken for: it
+  -- physically cannot take a second fluid.
+  local held_ok, fluids = pcall(function() return wagon.get_fluid_contents() end)
+  if held_ok and type(fluids) == "table" then
+    for held in pairs(fluids) do
+      if type(held) == "string" then return held end
+    end
+  end
+  return nil
+end
+
+--- The wagons a fluid may be put into, following the same assignment the
+--- fluidbox filters were built from, so a fluid can never spill into the wagon
+--- the next demand entry is relying on.
+local function wagons_for_fluid(wagons, demand, name)
+  local fluid_wagons = fluid_wagons_of(wagons)
+  local assignment = fluid_wagon_names(demand, #fluid_wagons)
+
+  local targets, unassigned = {}, {}
+  for index, wagon in ipairs(fluid_wagons) do
+    -- The wagon's own filter outranks the assignment recomputed from the
+    -- demand: a train trimmed to fit the line carries fewer wagons than the
+    -- demand asked for, and the engine filter is what actually decides what
+    -- the wagon will take.
+    local bound = wagon_fluid(wagon) or assignment[index]
+    if bound == name then
+      targets[#targets + 1] = wagon
+    elseif bound == nil then
+      unassigned[#unassigned + 1] = wagon
+    end
+  end
+
+  -- A console call can name a fluid the current demand never asked for. It has
+  -- no wagon of its own, so it may use any wagon no demanded fluid claimed.
+  if #targets == 0 then return unassigned end
+  return targets
+end
+
+--- Take up to `wanted` of a fluid out of the fluid wagons. Every wagon is
+--- searched rather than only the ones assigned to this fluid: remove_fluid
+--- names the fluid it takes, so a wagon assigned elsewhere can only ever give
+--- back what belongs to this entry anyway, and a fluid that somehow ended up in
+--- the wrong wagon still counts as paid.
 local function take_fluid(wagons, name, wanted)
   local taken = 0
   for _, wagon in ipairs(wagons) do
@@ -721,24 +1105,27 @@ function train_manager.insert(entry, amount)
   amount = math.floor(tonumber(amount) or 0)
   if amount <= 0 then return 0 end
 
+  local taxes = ensure_state()
   local _, wagons = resolve()
   if #wagons == 0 then return 0 end
 
   local inserted = 0
   if is_fluid_entry(entry) then
-    for _, wagon in ipairs(wagons) do
+    for _, wagon in ipairs(wagons_for_fluid(wagons, taxes and taxes.demand, entry.name)) do
       if inserted >= amount then break end
-      if wagon.valid and wagon.name == "fluid-wagon" then
-        -- insert_fluid already stops at the wagon's own capacity and refuses a
-        -- wagon holding a different fluid, which is exactly the per-wagon cap
-        -- and the no-mixing rule the composition assumed.
-        local room = math.min(amount - inserted, config.FLUID_WAGON_CAPACITY)
+      -- insert_fluid stops at the wagon's own capacity and refuses a wagon
+      -- holding a different fluid, but it has no idea what a previous call
+      -- already put in there. Asking for a full wagon's worth regardless is
+      -- what let a second /tax-fill push a fluid past its demanded total.
+      local room = math.min(amount - inserted, config.FLUID_WAGON_CAPACITY - fluid_level(wagon))
+      if room > 0 then
         local ok, accepted = pcall(function()
           return wagon.insert_fluid({ name = entry.name, amount = room })
         end)
         if ok and type(accepted) == "number" then inserted = inserted + accepted end
       end
     end
+    -- Fluid amounts are floats, so report whole units.
     inserted = math.floor(inserted + 0.5)
   else
     for _, wagon in ipairs(wagons) do
@@ -759,11 +1146,34 @@ function train_manager.insert(entry, amount)
     end
   end
 
-  if inserted > amount then inserted = amount end
+  -- Report what actually went in, not what was asked for: a clamp here would
+  -- hide an over-insertion instead of preventing one, and the caller prints
+  -- this figure back to the tester as the truth about the wagons.
   return inserted
 end
 
+--- Whether this demand has already been through settle(). Recorded on each
+--- entry rather than as a flag beside them, because a demand is an array and
+--- other modules walk it with pairs: a non integer key in there would be picked
+--- up as an entry and indexed as one.
+local function already_settled(demand)
+  local any = false
+  for _, entry in ipairs(demand) do
+    if type(entry) == "table" and type(entry.name) == "string" then
+      any = true
+      if not entry.settled then return false end
+    end
+  end
+  return any
+end
+
 --- Settle the cycle: bank what was delivered and report what was not.
+---
+--- Settles a given demand at most once. /tax-settle is a debug command and a
+--- tester will run it twice; the second run used to remove the residue of an
+--- over-delivered demand all over again, report a shortfall on a cycle that had
+--- been paid in full, and fire a punitive wave for it. A repeat call now
+--- recomputes the same answer from what was already banked and takes nothing.
 -- @param demand table|nil defaults to the current cycle's demand
 -- @return number shortfall in [0, 1]; 0 for an empty demand, never a division
 --   by zero, and 1 when the train is gone and nothing could be collected
@@ -772,35 +1182,56 @@ function train_manager.settle(demand)
   demand = demand or (taxes and taxes.demand)
   if type(demand) ~= "table" then return 0 end
 
-  local _, wagons = resolve()
-  local demanded_total, delivered_total = 0, 0
+  local settled = already_settled(demand)
+  local wagons = {}
+  if not settled then
+    local _
+    _, wagons = resolve()
+  end
 
-  for _, entry in pairs(demand) do
+  -- DESIGN section 7 asks for a shortfall weighted by each entry's share, which
+  -- is the mean of the per entry shortfalls and not the ratio of the summed
+  -- counts. Items are counted in units and fluids in tens of thousands, so
+  -- summing raw counts lets a single fluid entry drown out every item entry: a
+  -- demand of 12000 iron plate and 200000 crude oil with the iron skipped
+  -- entirely used to read as a 6% shortfall, a one unit wave for half a tax
+  -- unpaid. Each entry now carries the same weight whatever its magnitude.
+  local entries, shortfall_sum = 0, 0
+
+  for _, entry in ipairs(demand) do
     if type(entry) == "table" and type(entry.name) == "string" then
       local count = tonumber(entry.count) or 0
       if count > 0 then
-        demanded_total = demanded_total + count
-        -- Read and remove per entry rather than from a snapshot, so a demand
-        -- that lists the same name twice cannot be paid once and counted twice.
         local delivered
-        if is_fluid_entry(entry) then
+        if settled then
+          -- Nothing more is taken: the figure banked by the first pass is the
+          -- answer, so a repeat call cannot punish an already paid cycle.
+          delivered = tonumber(entry.delivered) or 0
+        elseif is_fluid_entry(entry) then
+          -- Read and remove per entry rather than from a snapshot, so a demand
+          -- that lists the same name twice cannot be paid once and counted
+          -- twice.
           delivered = take_fluid(wagons, entry.name, count)
         else
           delivered = take_item(wagons, entry.name, count)
         end
         if delivered > count then delivered = count end
+        if delivered < 0 then delivered = 0 end
         entry.delivered = delivered
-        delivered_total = delivered_total + delivered
+        entry.settled = true
+        entries = entries + 1
+        shortfall_sum = shortfall_sum + (1 - delivered / count)
       else
         entry.delivered = tonumber(entry.delivered) or 0
+        entry.settled = true
       end
     end
   end
 
   -- A demand that asks for nothing is trivially paid in full.
-  if demanded_total <= 0 then return 0 end
+  if entries <= 0 then return 0 end
 
-  local shortfall = 1 - delivered_total / demanded_total
+  local shortfall = shortfall_sum / entries
   if shortfall < 0 then shortfall = 0 end
   if shortfall > 1 then shortfall = 1 end
   return shortfall
@@ -820,6 +1251,37 @@ local function push_east(train)
     end
     train.speed = MANUAL_DEPART_SPEED * direction
   end)
+end
+
+--- Positive evidence that a train is actually going somewhere, rather than that
+--- a call about it did not raise. An unpathable schedule is accepted happily
+--- and leaves the train standing in no_path, so a pcall around the schedule
+--- edit says nothing at all about whether the train left.
+local function is_under_way(train)
+  if not (train and train.valid) then return false end
+
+  -- Already rolling is the strongest evidence there is, and it is the only kind
+  -- a hand pushed train in manual mode offers.
+  local speed_ok, speed = pcall(function() return train.speed end)
+  if speed_ok and type(speed) == "number" and math.abs(speed) > 0.01 then return true end
+
+  -- Standing still only counts if the automatic driver has somewhere to go. A
+  -- train left in manual control, no_path or destination_full does not.
+  local manual_ok, manual = pcall(function() return train.manual_mode end)
+  if manual_ok and manual == true then return false end
+
+  local path_ok, has_path = pcall(function() return train.has_path end)
+  if path_ok and has_path == true then return true end
+
+  local state_ok, state = pcall(function() return train.state end)
+  if state_ok and type(state) == "number" and type(defines.train_state) == "table" then
+    local states = defines.train_state
+    if state == states.on_the_path or state == states.arrive_signal
+        or state == states.wait_signal or state == states.arrive_station then
+      return true
+    end
+  end
+  return false
 end
 
 --- The rail closest to a point, or nil if the line is not there.
@@ -859,25 +1321,32 @@ function train_manager.depart()
   if surface and surface.valid then
     local rail = nearest_rail(surface, east)
     if rail then
-      moving = pcall(function()
+      local applied = pcall(function()
         local schedule = train.get_schedule()
         schedule.clear_records()
         schedule.add_record({ rail = rail, temporary = true })
         schedule.go_to_station(1)
         train.manual_mode = false
       end)
+      -- A schedule the engine accepted is not the same thing as a train that is
+      -- leaving: an unreachable target is taken without complaint and the train
+      -- sits in no_path on the station for the whole DEPART_TIMEOUT. So ask the
+      -- train what it is doing rather than trusting that nothing raised.
+      moving = applied and is_under_way(train)
     end
   end
 
   if not moving then
     -- A rail targeted schedule record is the one part of the 2.0 schedule API
-    -- the probes never exercised, so if it is rejected the train is driven east
-    -- by hand instead and check_despawn keeps it rolling.
-    log("[taxes] departure schedule rejected near " .. east.x .. "," .. east.y .. ", pushing the train east by hand")
-    moving = push_east(train)
+    -- the probes never exercised, so if it is rejected, or accepted and then
+    -- unpathable, the train is driven east by hand instead and check_despawn
+    -- keeps it rolling.
+    log("[taxes] departure schedule did not move the train near " .. east.x .. "," .. east.y
+      .. ", pushing it east by hand")
+    moving = push_east(train) and is_under_way(train)
   end
 
-  if taxes then taxes.train.departing = true end
+  if taxes and taxes.train then taxes.train.departing = true end
   if moving then util.announce({ "taxes.train-departing" }) end
   return moving
 end
@@ -920,7 +1389,9 @@ function train_manager.check_despawn()
   -- Keep a hand pushed departure rolling; friction would otherwise stall it
   -- short of the east end. An automatically driven train is never in manual
   -- mode, so this cannot fight the schedule.
-  if taxes and taxes.train.departing then
+  -- departing postdates the first saves of this scenario, so it can be nil on a
+  -- load from an older revision; nil simply means "was never released".
+  if taxes and taxes.train and taxes.train.departing then
     pcall(function()
       if train.manual_mode and math.abs(train.speed) < 0.05 then push_east(train) end
     end)
