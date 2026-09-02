@@ -686,6 +686,46 @@ end
 -- @param train LuaTrain|nil the coupled train build_train() resolved
 -- @return LuaTrain|nil nil when the train could not be recorded, in which case
 --   nothing of it is left on the map
+-- Fuels the tax train, best available first. A locomotive with an empty burner
+-- reports state on_the_path with a valid path and simply never moves, which is
+-- indistinguishable from a pathing failure unless you look at the burner. Every
+-- automated test reached the station through force_to_station(), which teleports
+-- the train, so an unfuelled train passed the whole suite and then sat still the
+-- moment it had to drive itself.
+local FUEL_PREFERENCE = { "rocket-fuel", "solid-fuel", "coal", "wood" }
+
+local function fuel_locomotives(locos)
+  local fuel_name
+  for _, candidate in ipairs(FUEL_PREFERENCE) do
+    if prototypes.item[candidate] then
+      fuel_name = candidate
+      break
+    end
+  end
+  if not fuel_name then
+    log("[taxes] no known fuel item exists; the tax train cannot move under its own power")
+    return
+  end
+
+  local stack_size = util.stack_size(fuel_name)
+  for _, loco in ipairs(locos) do
+    local ok = pcall(function()
+      local inventory = loco.get_inventory(defines.inventory.fuel)
+      if not inventory then return end
+      -- Fill every slot: the train has to reach the station and then drive off
+      -- the far end of the line, and it must never strand itself mid-cycle.
+      for slot = 1, #inventory do
+        if not inventory[slot].valid_for_read then
+          inventory[slot].set_stack({ name = fuel_name, count = stack_size })
+        end
+      end
+    end)
+    if not ok then
+      log("[taxes] could not fuel a tax locomotive with " .. fuel_name)
+    end
+  end
+end
+
 local function commission(taxes, comp, created, train)
   local locos, wagons = {}, {}
   for index, entity in ipairs(created) do
@@ -699,6 +739,9 @@ local function commission(taxes, comp, created, train)
       wagons[#wagons + 1] = entity
     end
   end
+
+  -- Fuel before the schedule is set, so the train can act on it immediately.
+  fuel_locomotives(locos)
 
   -- The seeds have to be recorded before anything reads the wagons back, so
   -- contents(), settle() and insert() all know which unit of fluid is ours.

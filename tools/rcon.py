@@ -89,7 +89,17 @@ def main(argv):
             with open(argv[4], encoding="utf-8") as handle:
                 lines = [line.rstrip("\n") for line in handle]
             for line in lines:
-                if not line.strip() or line.lstrip().startswith("#"):
+                stripped = line.strip()
+                # "#sleep N" lets a command file wait for the game to do
+                # something on its own, such as a train actually driving to the
+                # station rather than being teleported there.
+                if stripped.startswith("#sleep"):
+                    parts = stripped.split()
+                    seconds = float(parts[1]) if len(parts) > 1 else 1.0
+                    print("### sleep %g" % seconds)
+                    time.sleep(seconds)
+                    continue
+                if not stripped or stripped.startswith("#"):
                     continue
                 print("### %s" % line)
                 print(rcon.command(line))

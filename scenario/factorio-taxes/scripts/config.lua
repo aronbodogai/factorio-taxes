@@ -27,7 +27,9 @@ local config = {
   SURFACE_NAME         = "nauvis",
   STATION_NAME         = "Tax Station",
   RAIL_Y               = -31, -- rail line offset north of spawn; must be ODD (rails snap to the odd grid)
-  RAIL_HALF_LENGTH     = 120, -- half the length of the line, in tiles
+  RAIL_HALF_LENGTH     = 300, -- half the length of the line, in tiles; long enough
+                              -- that the train appears out of unexplored fog and
+                              -- visibly rolls in, rather than popping into view
   CORRIDOR_HALF_WIDTH  = 6,   -- tiles cleared and levelled either side of the line
   CHART_RADIUS         = 96,  -- radius charted for the player force at map start
   DESPAWN_RADIUS       = 24,  -- how close to the east end a train must get to despawn

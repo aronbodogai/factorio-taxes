@@ -202,7 +202,7 @@ Every tunable lives in `scripts/config.lua`. Defaults:
 | `TIER_WINDOW` | `1` | How many tiers below the top stay eligible |
 | `MAX_DEMAND_TYPES` | `4` | Cap on distinct demanded items per cycle |
 | `RAIL_Y` | `-31` | Rail line offset from spawn |
-| `RAIL_HALF_LENGTH` | `120` | Half the rail line length, in tiles |
+| `RAIL_HALF_LENGTH` | `300` | Half the rail line length, in tiles |
 | `BASE_WAVE` | `12` | Units in a fully unpaid wave at cycle 0 |
 | `MAX_WAVE` | `200` | Hard cap on wave size |
 

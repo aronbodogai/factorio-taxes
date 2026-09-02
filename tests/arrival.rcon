@@ -1,0 +1,23 @@
+# The train must reach the station BY DRIVING. Every other test reaches the
+# loading phase through /tax-arrive, which teleports the train, so none of them
+# could ever catch an unfuelled locomotive: it reports a valid path and state
+# on_the_path, and simply never moves.
+/tax-build
+/tax-cycle 2
+/tax-demand 2
+/tax-train
+/silent-command local s=game.surfaces.nauvis; local bad=0; local total=0; for _,l in pairs(s.find_entities_filtered{name="locomotive"}) do local inv=l.get_inventory(defines.inventory.fuel); local n=0; for i=1,#inv do if inv[i].valid_for_read then n=n+inv[i].count end end; total=total+n; if n==0 then bad=bad+1 end end; rcon.print(bad==0 and ("OK all-locomotives-fuelled items="..total) or ("FAIL unfuelled-locomotives="..bad))
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; rcon.print("PROBE start x="..math.floor(l.position.x).." state="..tostring(l.train.state).." has_path="..tostring(l.train.has_path))
+#sleep 20
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; rcon.print("PROBE t+20 x="..math.floor(l.position.x).." speed="..string.format("%.3f",l.train.speed).." state="..tostring(l.train.state))
+#sleep 20
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; rcon.print("PROBE t+40 x="..math.floor(l.position.x).." state="..tostring(l.train.state))
+/silent-command local s=game.surfaces.nauvis; local st=s.find_entities_filtered{name="train-stop"}[1]; local l=s.find_entities_filtered{name="locomotive"}[1]; local d=math.abs(l.position.x-st.position.x); rcon.print(d<12 and ("OK train-drove-to-station distance="..string.format("%.1f",d)) or ("FAIL train-stuck-at-x="..math.floor(l.position.x).." station-x="..st.position.x))
+/silent-command rcon.print(storage.taxes.phase=="loading" and "OK reached-loading-without-teleport" or ("FAIL phase="..storage.taxes.phase))
+# It must also be able to drive AWAY under its own power.
+/tax-fill 1
+/tax-settle
+#sleep 25
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; if not l then rcon.print("OK train-departed-and-despawned") else rcon.print("PROBE departing x="..math.floor(l.position.x).." speed="..string.format("%.3f",l.train.speed)) end
+#sleep 25
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; if not l then rcon.print("OK train-gone") else rcon.print((l.position.x>40) and ("OK train-driving-east x="..math.floor(l.position.x)) or ("FAIL train-not-leaving x="..math.floor(l.position.x))) end

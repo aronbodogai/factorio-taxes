@@ -10,6 +10,7 @@ REPO="${REPO:-/mnt/b/repos/factorio-taxes}"
 SERVER="${SERVER:-$HOME/factorio-taxes-server/factorio}"
 BIN="$SERVER/bin/x64/factorio"
 RCON_PORT="${RCON_PORT:-27016}"
+GAME_PORT="${GAME_PORT:-34211}"
 RCON_PASSWORD="${RCON_PASSWORD:-taxes}"
 RUN_DIR="${RUN_DIR:-$HOME/factorio-taxes-server/run-reload}"
 SAVE_NAME="taxes-reload"
@@ -73,6 +74,7 @@ run_phase() {
   "$BIN" "$@" \
     --server-settings "$SETTINGS" \
     --mod-directory "$MODS_DIR" \
+    --port "$GAME_PORT" \
     --rcon-port "$RCON_PORT" \
     --rcon-password "$RCON_PASSWORD" \
     >"$log" 2>&1 &

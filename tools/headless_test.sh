@@ -12,6 +12,7 @@ REPO="${REPO:-/mnt/b/repos/factorio-taxes}"
 SERVER="${SERVER:-$HOME/factorio-taxes-server/factorio}"
 BIN="$SERVER/bin/x64/factorio"
 RCON_PORT="${RCON_PORT:-27015}"
+GAME_PORT="${GAME_PORT:-34210}"
 RCON_PASSWORD="${RCON_PASSWORD:-taxes}"
 RUN_DIR="${RUN_DIR:-$HOME/factorio-taxes-server/run}"
 SCENARIO="${SCENARIO:-factorio-taxes}"
@@ -67,6 +68,7 @@ rm -f "$LOG" "$OUT"
 "$BIN" --start-server-load-scenario "$SCENARIO" \
        --server-settings "$SETTINGS" \
        --mod-directory "$MODS_DIR" \
+       --port "$GAME_PORT" \
        --rcon-port "$RCON_PORT" \
        --rcon-password "$RCON_PASSWORD" \
        >"$LOG" 2>&1 &
