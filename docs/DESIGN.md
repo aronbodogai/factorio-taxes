@@ -56,6 +56,7 @@ storage.taxes = {
     west_end         = nil,     -- MapPosition, train spawn point
     east_end         = nil,     -- MapPosition, train despawn point
     entities         = {},      -- set: [unit_number] = true, all immutable infra
+    combinator_unit_number = nil, -- the constant combinator publishing the demand
     built            = false,
   },
   train = {
@@ -269,3 +270,26 @@ a pathing failure. Every test reached the loading phase through
 `force_to_station()`, which teleports, so an unfuelled train passed the entire
 suite and only failed in real play. `tests/arrival.rcon` now lets the train
 drive and asserts it both arrives and departs under its own power.
+
+## 13. Circuit readout
+
+A constant combinator stands beside the tax station and publishes the upcoming
+demand, so the tax can be paid by an automated system rather than by hand.
+
+* One signal per demanded entry, the signal value being the demanded amount:
+  an item signal for `kind == "item"`, a fluid signal for `kind == "fluid"`.
+* `signal-T`, seconds left in the current phase. During `loading` that is the
+  time left to pay; during `cooldown` it is the time left to prepare.
+* `signal-C`, the cycle number.
+
+The combinator is protected like the rest of the infrastructure — indestructible
+and unminable — but unlike the station it stays **operable**, because the player
+has to be able to open it to see what it is outputting. Mining and deconstruction
+are already prevented by the entity flags and the existing handlers, so leaving
+it operable gives away nothing.
+
+The demand is generated when the quiet period BEGINS rather than when the train
+is announced. That is what makes the readout useful: the combinator advertises
+the next tax for the whole cooldown, so a player can have the items staged before
+the train is even dispatched. The announcement at the end of the cooldown then
+announces a demand that has already been on the wire.

@@ -19,6 +19,20 @@ local LEVEL_TILE = "grass-1"
 -- 2x2 entity, so the neighbouring 2x2 slot is exactly two tiles away.
 local STOP_OFFSET = 2
 
+-- The circuit readout that publishes the upcoming demand (docs/DESIGN.md
+-- section 13). It is a 1x1 entity, so it snaps to tile centres rather than to
+-- the odd 2x2 grid the rail and the stop use.
+local COMBINATOR_NAME = "constant-combinator"
+
+-- Distance from the rail centre line to the centre of the readout combinator.
+-- The rail is a 2x2 entity at RAIL_Y and so covers the tile rows RAIL_Y - 1 and
+-- RAIL_Y; the stop is a 2x2 entity at RAIL_Y + STOP_OFFSET and covers the rows
+-- RAIL_Y + 1 and RAIL_Y + 2. RAIL_Y + 3 is therefore the first free row south of
+-- the stop, and the centre of a 1x1 tile in that row is half a tile into it.
+-- Putting the combinator further from the track than the stop is what guarantees
+-- it can never foul the rail, the platform, or a train standing at it.
+local COMBINATOR_OFFSET = STOP_OFFSET + 1.5
+
 -- How far inside the last rail the spawn and despawn points sit. Kept even so
 -- the points stay on the odd grid the rails use. The train is assembled
 -- eastwards from west_end, so a couple of tiles of margin is enough.
@@ -44,6 +58,10 @@ local WATER_TILE_NAMES = {
 -- Resolved lookup of the station entity. This is derived state, not persistent
 -- state: it is empty after a load and rebuilt from storage on first use.
 local station_cache = nil
+
+-- The same for the readout combinator, so ensure() can confirm it is still
+-- standing without an entity lookup on every call.
+local combinator_cache = nil
 
 -- Geometry ------------------------------------------------------------------
 
@@ -103,6 +121,16 @@ end
 --- has no tile centred on x = 0, so -1 is the nearest slot to it.
 local function station_position()
   return { x = to_odd(0), y = config.RAIL_Y + STOP_OFFSET }
+end
+
+--- Where the readout combinator stands: directly south of the station, one tile
+--- row further from the track than the stop itself reaches. A 1x1 entity snaps
+--- to tile centres, so the position is offset half a tile from the stop's own
+--- coordinates and the position the entity reports back is exactly the one we
+--- asked for, which is what lets find_entity locate it again after a load.
+local function combinator_position()
+  local stop = station_position()
+  return { x = stop.x + 0.5, y = config.RAIL_Y + COMBINATOR_OFFSET }
 end
 
 -- Corridor preparation ------------------------------------------------------
@@ -342,6 +370,69 @@ local function adopt_station(infra, stop)
   infra.stop_position = { x = stop.position.x, y = stop.position.y }
 end
 
+--- Record a freshly resolved combinator in state and in the cache. The unit
+--- number is the only handle scripts/signals.lua has on the entity, so it has to
+--- be rewritten every time the entity behind it is replaced.
+local function adopt_combinator(infra, combinator)
+  combinator_cache = combinator
+  infra.combinator_unit_number = combinator.unit_number
+end
+
+--- Place the readout combinator beside the station, adopting one that is already
+--- there. Unlike the station this is not load bearing: the cycle runs exactly the
+--- same without it, only without the circuit readout, so a failure to place it is
+--- logged rather than allowed to fail the pass.
+local function place_combinator(surface, force)
+  if combinator_cache and combinator_cache.valid then return combinator_cache end
+  combinator_cache = nil
+
+  local position = combinator_position()
+  local combinator = surface.find_entity(COMBINATOR_NAME, position)
+  if not combinator then
+    combinator = surface.create_entity({
+      name = COMBINATOR_NAME,
+      position = position,
+      direction = defines.direction.north,
+      force = force,
+    })
+  end
+
+  if not combinator then
+    log(string.format(
+      "[taxes] the tax readout combinator could not be placed at x = %s, y = %s; something is standing in its slot",
+      tostring(position.x), tostring(position.y)))
+    return nil
+  end
+
+  -- operable = true, unlike every other piece of tax infrastructure. The player
+  -- has to be able to open this one to read what it is publishing and to wire it
+  -- into a base (docs/DESIGN.md section 13). That is all being operable grants:
+  -- minable = false, destructible = false and the deconstruction handler still
+  -- make it impossible to take away or move, and the only thing the GUI exposes
+  -- is the filter list, which the next readout refresh overwrites a second later.
+  util.protect(combinator, true)
+  return combinator
+end
+
+--- Put the readout combinator back if it has gone, and keep the recorded unit
+--- number pointing at whatever is actually standing there. The module cache makes
+--- the usual case a single validity test, so this is cheap enough for ensure().
+local function ensure_combinator(infra, surface, force)
+  if not (infra and surface and force) then return nil end
+
+  local combinator = place_combinator(surface, force)
+  if combinator then
+    adopt_combinator(infra, combinator)
+    return combinator
+  end
+
+  -- Nothing is standing at the readout position, so the recorded unit number
+  -- names an entity that no longer exists. Clearing it stops signals.lua hunting
+  -- for that number once a second for the rest of the game.
+  infra.combinator_unit_number = nil
+  return nil
+end
+
 -- Public interface ----------------------------------------------------------
 
 --- Build the corridor, the line, and the station, and record them in state.
@@ -376,6 +467,7 @@ function rail_infra.build()
     return false
   end
   adopt_station(infra, stop)
+  ensure_combinator(infra, surface, force)
 
   local first_x, last_x = line_extents()
   infra.west_end = { x = first_x + END_INSET, y = config.RAIL_Y }
@@ -414,6 +506,8 @@ function rail_infra.ensure()
   local surface = util.surface()
   if not surface then return rail_infra.build() end
 
+  local force = util.player_force()
+
   -- A nil count means the query itself failed, which is no evidence of damage,
   -- so do not tear the line down over it.
   local rails = count_line_rails(surface)
@@ -421,11 +515,13 @@ function rail_infra.ensure()
   local stop = rail_infra.station()
 
   if rails_ok and station_is_valid(stop) then
+    -- The readout combinator rides along on the cheap path rather than getting a
+    -- pass of its own: a cached one costs a validity test, and one that has
+    -- somehow gone is replaced without the line being touched at all.
+    ensure_combinator(infra, surface, force)
     infra.built = true
     return true
   end
-
-  local force = util.player_force()
 
   -- The line is intact and only the station is wrong. Re-placing a single entity
   -- costs a handful of API calls where build() re-walks several thousand tiles,
@@ -435,6 +531,7 @@ function rail_infra.ensure()
     local repaired = place_station(surface, force)
     if repaired then
       adopt_station(infra, repaired)
+      ensure_combinator(infra, surface, force)
       infra.built = true
       return true
     end
@@ -534,6 +631,7 @@ function rail_infra.on_mined(event)
   warn_miner(event, entity)
 
   local rebuildable = entity.type == "straight-rail" or entity.type == "train-stop"
+    or entity.name == COMBINATOR_NAME
   if not rebuildable then
     log(string.format(
       "[taxes] tax rolling stock (%s) was mined and cannot be restored from here", entity.name))
@@ -570,11 +668,17 @@ function rail_infra.on_mined(event)
   end
 
   if backer_name then rebuilt.backer_name = backer_name end
-  util.protect(rebuilt, false)
+  -- The readout combinator is the one piece of infrastructure the player may
+  -- open, so it goes back operable; everything else goes back locked.
+  util.protect(rebuilt, rebuilt.name == COMBINATOR_NAME)
 
-  if rebuilt.type == "train-stop" then
-    local infra = storage.taxes and storage.taxes.infra
-    if infra then adopt_station(infra, rebuilt) end
+  local infra = storage.taxes and storage.taxes.infra
+  if infra and rebuilt.type == "train-stop" then
+    adopt_station(infra, rebuilt)
+  elseif infra and rebuilt.name == COMBINATOR_NAME then
+    -- The replacement has an empty section; the next readout refresh, a second
+    -- later at most, fills it back in.
+    adopt_combinator(infra, rebuilt)
   end
   log(string.format("[taxes] restored %s that was mined out of the tax line", spec.name))
 end

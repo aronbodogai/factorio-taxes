@@ -1,0 +1,31 @@
+# The combinator beside the station must advertise the upcoming tax on the
+# circuit network, so the demand can be paid by an automated system.
+/tax-build
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; rcon.print(c and ("OK combinator-exists at "..math.floor(c.position.x)..","..math.floor(c.position.y)) or "FAIL no-combinator")
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; rcon.print((c.destructible==false and c.minable==false) and "OK combinator-immutable" or "FAIL combinator-mutable")
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; rcon.print(c.operable and "OK combinator-openable" or "FAIL combinator-not-openable")
+# It must not sit on the rails or block the stop.
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; local n=#s.find_entities_filtered{area={{c.position.x-0.4,c.position.y-0.4},{c.position.x+0.4,c.position.y+0.4}},name={"straight-rail","train-stop"}}; rcon.print(n==0 and "OK combinator-clear-of-track" or ("FAIL combinator-overlaps="..n))
+
+# --- Signals match the demand ------------------------------------------------
+/silent-command storage.taxes.demand={{kind="item",name="iron-plate",count=250,delivered=0},{kind="fluid",name="water",count=12000,delivered=0}}; storage.taxes.cycle=7; rcon.print("PROBE demand-set")
+#sleep 3
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; local sec=c.get_control_behavior().get_section(1); local out={}; for _,f in pairs(sec.filters or {}) do out[#out+1]=f.value.name.."="..f.min end; table.sort(out); rcon.print("PROBE signals "..table.concat(out," "))
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; local sec=c.get_control_behavior().get_section(1); local got={}; for _,f in pairs(sec.filters or {}) do got[f.value.name]=f.min end; rcon.print(got["iron-plate"]==250 and "OK item-signal-correct" or ("FAIL iron-plate="..tostring(got["iron-plate"])))
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; local sec=c.get_control_behavior().get_section(1); local got={}; for _,f in pairs(sec.filters or {}) do got[f.value.name]=f.min end; rcon.print(got["water"]==12000 and "OK fluid-signal-correct" or ("FAIL water="..tostring(got["water"])))
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; local sec=c.get_control_behavior().get_section(1); local got={}; for _,f in pairs(sec.filters or {}) do got[f.value.name]=f.min end; rcon.print(got["signal-C"]==7 and "OK cycle-signal-correct" or ("FAIL signal-C="..tostring(got["signal-C"])))
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; local sec=c.get_control_behavior().get_section(1); local q; for _,f in pairs(sec.filters or {}) do if f.value.type=="fluid" then q=f.value.quality end end; rcon.print(q==nil and "OK fluid-filter-has-no-quality" or ("FAIL fluid-quality="..tostring(q)))
+
+# --- The countdown must be live ----------------------------------------------
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; local sec=c.get_control_behavior().get_section(1); for _,f in pairs(sec.filters or {}) do if f.value.name=="signal-T" then storage.t1=f.min end end; rcon.print("PROBE T1="..tostring(storage.t1))
+#sleep 6
+/silent-command local s=game.surfaces.nauvis; local c=s.find_entities_filtered{name="constant-combinator"}[1]; local sec=c.get_control_behavior().get_section(1); local t2; for _,f in pairs(sec.filters or {}) do if f.value.name=="signal-T" then t2=f.min end end; rcon.print((storage.t1 and t2 and t2<storage.t1) and ("OK countdown-live "..storage.t1.." -> "..t2) or ("FAIL T "..tostring(storage.t1).." -> "..tostring(t2)))
+
+# --- The demand is standing during the quiet period, not only once announced --
+/silent-command rcon.print((storage.taxes.phase=="cooldown" and storage.taxes.demand and #storage.taxes.demand>0) and "OK demand-known-during-cooldown" or ("FAIL phase="..storage.taxes.phase.." demand="..tostring(storage.taxes.demand and #storage.taxes.demand)))
+
+# --- Survives removal and is rebuilt -----------------------------------------
+/silent-command local s=game.surfaces.nauvis; s.find_entities_filtered{name="constant-combinator"}[1].destroy(); rcon.print("PROBE destroyed-combinator")
+/tax-build
+/silent-command local s=game.surfaces.nauvis; local n=#s.find_entities_filtered{name="constant-combinator"}; rcon.print(n==1 and "OK rebuilt-after-removal" or ("FAIL count="..n))
+/tax-selftest

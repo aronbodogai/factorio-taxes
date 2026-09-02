@@ -10,8 +10,29 @@ local tax_request = require("scripts.tax_request")
 local train_manager = require("scripts.train_manager")
 local punishment = require("scripts.punishment")
 local gui = require("scripts.gui")
+local signals = require("scripts.signals")
 
 local tax_schedule = {}
+
+--- Seconds left in the current phase, which is what the combinator publishes as
+--- signal-T. During loading it is the time left to pay, and during cooldown it
+--- is the time left to prepare, so a circuit can use it in either phase.
+local function seconds_remaining()
+  local state = storage.taxes
+  local ticks = (state.phase_end_tick or 0) - game.tick
+  if ticks < 0 then ticks = 0 end
+  return math.floor(ticks / 60)
+end
+
+--- Generate the demand for the current cycle and put it on the wire.
+--- Called as soon as the quiet period begins rather than when the train is
+--- announced, so the combinator advertises the next tax for the whole cooldown
+--- and a player can have the items staged before the train is even dispatched.
+local function prepare_demand()
+  local state = storage.taxes
+  state.demand = tax_request.generate(state.cycle)
+  signals.publish(state.demand, seconds_remaining(), state.cycle)
+end
 
 --- Move to a phase and set the tick at which it expires. A duration of nil means
 --- the phase ends on an event rather than a timer, so the deadline becomes a
@@ -37,7 +58,23 @@ end
 --- Generate the demand for the coming cycle and warn the players.
 function tax_schedule.begin_cycle()
   local state = storage.taxes
-  state.demand = tax_request.generate(state.cycle)
+
+  -- The demand is normally already standing, prepared when the quiet period
+  -- began. Only generate one here if it is missing or belongs to a cycle that
+  -- has already been settled, so the tax announced is the tax the combinator
+  -- has been advertising all along.
+  local stale = not state.demand or #state.demand == 0
+  if not stale then
+    for _, entry in pairs(state.demand) do
+      if entry.settled then
+        stale = true
+        break
+      end
+    end
+  end
+  if stale then
+    state.demand = tax_request.generate(state.cycle)
+  end
 
   if demand_total(state.demand) <= 0 then
     -- Nothing could be demanded, which should be impossible. Rather than stall
@@ -116,6 +153,13 @@ function tax_schedule.on_tick(event)
   local phase = state.phase
   local expired = event.tick >= state.phase_end_tick
 
+  -- Republish on the UI cadence rather than every tick: the item signals rarely
+  -- change, but signal-T is a countdown and has to stay live for a circuit to
+  -- act on it. This also picks up a demand set by hand from /tax-demand.
+  if event.tick % config.UI_REFRESH == 0 then
+    signals.publish(state.demand, seconds_remaining(), state.cycle)
+  end
+
   if phase == "cooldown" then
     if expired then tax_schedule.begin_cycle() end
 
@@ -142,6 +186,9 @@ function tax_schedule.on_tick(event)
     if train_manager.check_despawn() or expired then
       train_manager.destroy()
       enter("cooldown", config.CYCLE_PERIOD)
+      -- The quiet period is the players preparation time, so the next tax goes
+      -- on the wire the moment it starts rather than when it is announced.
+      prepare_demand()
     end
 
   else
@@ -154,6 +201,7 @@ end
 function tax_schedule.init()
   rail_infra.build()
   enter("cooldown", config.CYCLE_PERIOD)
+  prepare_demand()
 end
 
 --- Exposed so debug commands can jump the machine around during testing.

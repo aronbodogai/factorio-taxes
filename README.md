@@ -79,6 +79,8 @@ see any particular stage. They work in game and over RCON.
 | `/tax-skip` | Expire the current phase immediately |
 | `/tax-selftest` | Assert the wiring; works in both scenario and mod form |
 
+
+
 A quick end-to-end check, by hand:
 
 ```
