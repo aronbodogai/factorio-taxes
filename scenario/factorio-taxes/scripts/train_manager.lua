@@ -692,18 +692,78 @@ end
 -- automated test reached the station through force_to_station(), which teleports
 -- the train, so an unfuelled train passed the whole suite and then sat still the
 -- moment it had to drive itself.
-local FUEL_PREFERENCE = { "rocket-fuel", "solid-fuel", "coal", "wood" }
+-- Items the world yields without a recipe, so they are available from the first
+-- tick. Derived from the resource and tree prototypes rather than hardcoded,
+-- and cached because prototypes cannot change while a game is running. On the
+-- base game this resolves to coal, wood, and the ores.
+local mineable_items
 
-local function fuel_locomotives(locos)
-  local fuel_name
-  for _, candidate in ipairs(FUEL_PREFERENCE) do
-    if prototypes.item[candidate] then
-      fuel_name = candidate
-      break
+local function mineable_item_set()
+  if mineable_items then return mineable_items end
+
+  mineable_items = {}
+  for _, proto in pairs(prototypes.entity) do
+    if proto.type == "resource" or proto.type == "tree" then
+      local mineable = proto.mineable_properties
+      if mineable and mineable.products then
+        for _, product in pairs(mineable.products) do
+          if product.type == "item" then
+            mineable_items[product.name] = true
+          end
+        end
+      end
     end
   end
+  return mineable_items
+end
+
+--- The best fuel this force could actually make for itself right now.
+-- The tax train burns what the player has unlocked rather than a fixed choice,
+-- so an early game train runs on coal and a late one on nuclear fuel. Nothing
+-- here is hardcoded: the accepted categories come from the locomotive's own
+-- burner, the candidates from every item with a fuel value, and availability
+-- from the force's enabled recipes plus what can simply be mined.
+local function best_available_fuel(force)
+  local loco_proto = prototypes.entity["locomotive"]
+  local burner = loco_proto and loco_proto.burner_prototype
+  local categories = burner and burner.fuel_categories
+  if not categories then return nil end
+
+  local obtainable = {}
+  for name in pairs(mineable_item_set()) do
+    obtainable[name] = true
+  end
+  if force then
+    for _, recipe in pairs(force.recipes) do
+      if recipe.enabled then
+        for _, product in pairs(recipe.products) do
+          if product.type == "item" then
+            obtainable[product.name] = true
+          end
+        end
+      end
+    end
+  end
+
+  local best, best_value
+  for name, proto in pairs(prototypes.item) do
+    local value = proto.fuel_value or 0
+    -- A locomotive burns chemical fuel only, so uranium fuel cells are
+    -- correctly excluded despite having by far the highest fuel value.
+    if value > 0 and categories[proto.fuel_category] and obtainable[name] then
+      if not best_value or value > best_value then
+        best, best_value = name, value
+      end
+    end
+  end
+  return best
+end
+
+local function fuel_locomotives(locos, force)
+  local fuel_name = best_available_fuel(force)
   if not fuel_name then
-    log("[taxes] no known fuel item exists; the tax train cannot move under its own power")
+    log("[taxes] no usable fuel is available to this force; the tax train cannot "
+      .. "move under its own power")
     return
   end
 
@@ -741,7 +801,7 @@ local function commission(taxes, comp, created, train)
   end
 
   -- Fuel before the schedule is set, so the train can act on it immediately.
-  fuel_locomotives(locos)
+  fuel_locomotives(locos, util.player_force())
 
   -- The seeds have to be recorded before anything reads the wagons back, so
   -- contents(), settle() and insert() all know which unit of fluid is ours.

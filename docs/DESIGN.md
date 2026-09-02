@@ -244,3 +244,28 @@ Measured after tuning, per ten-minute cycle:
 At cycle 60 that is 1.65 utility science per second sustained, which is a real
 but fair demand on a ten-hour base. The multiplier reaches its ceiling around
 cycle 63, so the endgame plateaus rather than diverging.
+
+## 12. Tax train fuel
+
+The tax train burns the best fuel the player force has actually unlocked, so an
+early game train runs on coal and a late one on nuclear fuel. Nothing about that
+is hardcoded:
+
+* the accepted fuel categories come from the locomotive's own `burner_prototype`
+  (`{chemical = true}` in the base game, which is why a uranium fuel cell is
+  never used despite having the highest fuel value in the game),
+* the candidates are every item prototype with a non-zero `fuel_value`,
+* availability is the union of what the force's enabled recipes produce and what
+  the world yields with no recipe at all, derived from the `resource` and `tree`
+  prototypes rather than a hardcoded list.
+
+Measured escalation, unlocking each recipe through whichever technology really
+grants it: coal (4 MJ) on a fresh game, then solid fuel (12 MJ), rocket fuel
+(100 MJ), and nuclear fuel (1210 MJ).
+
+Locomotives must be fuelled at all. An empty burner leaves the train reporting a
+valid path and state `on_the_path` while never moving, which looks exactly like
+a pathing failure. Every test reached the loading phase through
+`force_to_station()`, which teleports, so an unfuelled train passed the entire
+suite and only failed in real play. `tests/arrival.rcon` now lets the train
+drive and asserts it both arrives and departs under its own power.

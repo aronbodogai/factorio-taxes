@@ -1,0 +1,32 @@
+# The tax train must burn the best fuel the force has actually unlocked, so an
+# early game train runs on coal and a late one on nuclear fuel. Recipes are
+# unlocked through whichever technology really grants them, found by scanning
+# effects, so this also proves the tech-tree linkage rather than assuming names.
+/silent-command rcon.print("PROBE chemical-fuels "..(function() local o={} for n,p in pairs(prototypes.item) do if (p.fuel_value or 0)>0 and p.fuel_category=="chemical" then o[#o+1]=n..":"..math.floor(p.fuel_value/1000000).."MJ" end end table.sort(o) return table.concat(o," ") end)())
+
+# --- Fresh game: nothing researched, so the best fuel is what can be mined ----
+/tax-train
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; local inv=l.get_inventory(defines.inventory.fuel); local n="none"; for i=1,#inv do if inv[i].valid_for_read then n=inv[i].name break end end; if n=="none" and l.burner and l.burner.currently_burning then n=l.burner.currently_burning.name.name or l.burner.currently_burning.name end; rcon.print(n=="coal" and "OK fresh-game-burns-coal" or ("FAIL fresh-game-fuel="..n))
+/tax-despawn
+
+# --- Unlock solid fuel --------------------------------------------------------
+/silent-command local f=game.forces.player; for _,t in pairs(f.technologies) do for _,e in pairs(t.prototype.effects or {}) do if e.type=="unlock-recipe" and e.recipe=="solid-fuel-from-petroleum-gas" then t.researched=true end end end; rcon.print("PROBE solid-fuel-enabled="..tostring(f.recipes["solid-fuel-from-petroleum-gas"] and f.recipes["solid-fuel-from-petroleum-gas"].enabled))
+/tax-train
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; local inv=l.get_inventory(defines.inventory.fuel); local n="none"; for i=1,#inv do if inv[i].valid_for_read then n=inv[i].name break end end; if n=="none" and l.burner and l.burner.currently_burning then n=l.burner.currently_burning.name.name or l.burner.currently_burning.name end; rcon.print(n=="solid-fuel" and "OK upgrades-to-solid-fuel" or ("FAIL after-solid-fuel-tech="..n))
+/tax-despawn
+
+# --- Unlock rocket fuel -------------------------------------------------------
+/silent-command local f=game.forces.player; for _,t in pairs(f.technologies) do for _,e in pairs(t.prototype.effects or {}) do if e.type=="unlock-recipe" and e.recipe=="rocket-fuel" then t.researched=true end end end; rcon.print("PROBE rocket-fuel-enabled="..tostring(f.recipes["rocket-fuel"].enabled))
+/tax-train
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; local inv=l.get_inventory(defines.inventory.fuel); local n="none"; for i=1,#inv do if inv[i].valid_for_read then n=inv[i].name break end end; if n=="none" and l.burner and l.burner.currently_burning then n=l.burner.currently_burning.name.name or l.burner.currently_burning.name end; rcon.print(n=="rocket-fuel" and "OK upgrades-to-rocket-fuel" or ("FAIL after-rocket-fuel-tech="..n))
+/tax-despawn
+
+# --- Unlock nuclear fuel ------------------------------------------------------
+/silent-command local f=game.forces.player; for _,t in pairs(f.technologies) do for _,e in pairs(t.prototype.effects or {}) do if e.type=="unlock-recipe" and e.recipe=="nuclear-fuel" then t.researched=true end end end; rcon.print("PROBE nuclear-fuel-enabled="..tostring(f.recipes["nuclear-fuel"].enabled))
+/tax-train
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; local inv=l.get_inventory(defines.inventory.fuel); local n="none"; for i=1,#inv do if inv[i].valid_for_read then n=inv[i].name break end end; if n=="none" and l.burner and l.burner.currently_burning then n=l.burner.currently_burning.name.name or l.burner.currently_burning.name end; rcon.print(n=="nuclear-fuel" and "OK upgrades-to-nuclear-fuel" or ("FAIL after-nuclear-fuel-tech="..n))
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; local inv=l.get_inventory(defines.inventory.fuel); local n=0; for i=1,#inv do if inv[i].valid_for_read then n=n+inv[i].count end end; rcon.print(n>0 and ("OK all-slots-filled items="..n) or "FAIL no-fuel")
+# A uranium fuel cell is the highest fuel value in the game but is nuclear
+# category, so a locomotive must never be given one.
+/silent-command local s=game.surfaces.nauvis; local l=s.find_entities_filtered{name="locomotive"}[1]; local inv=l.get_inventory(defines.inventory.fuel); local bad=false; for i=1,#inv do if inv[i].valid_for_read and inv[i].name=="uranium-fuel-cell" then bad=true end end; rcon.print(bad and "FAIL locomotive-given-nuclear-category-fuel" or "OK nuclear-category-excluded")
+/tax-despawn
