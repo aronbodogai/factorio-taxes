@@ -10,12 +10,13 @@ RUN_DIR="${RUN_DIR:-$HOME/factorio-taxes-server/run-mod}"
 COMMANDS="${1:-tests/mod_smoke.rcon}"
 [ -f "$COMMANDS" ] || COMMANDS="$REPO/$COMMANDS"
 
-MOD_VERSION="${MOD_VERSION:-0.1.0}" "$REPO/tools/build_mod.sh" >/dev/null
+MOD_VERSION="${MOD_VERSION:-0.2.0}"
+MOD_VERSION="$MOD_VERSION" "$REPO/tools/build_mod.sh" >/dev/null
 
 MODS_DIR="$RUN_DIR/mods"
 mkdir -p "$MODS_DIR"
 rm -rf "$MODS_DIR/factorio-taxes"*
-cp -r "$REPO/build/factorio-taxes_${MOD_VERSION:-0.1.0}" "$MODS_DIR/"
+cp -r "$REPO/build/factorio-taxes_${MOD_VERSION}" "$MODS_DIR/"
 cat > "$MODS_DIR/mod-list.json" <<'JSON'
 { "mods": [
   { "name": "base", "enabled": true },

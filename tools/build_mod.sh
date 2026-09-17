@@ -8,7 +8,7 @@
 set -euo pipefail
 
 REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
-VERSION="${MOD_VERSION:-0.1.0}"
+VERSION="${MOD_VERSION:-0.2.0}"
 NAME="factorio-taxes"
 SRC="$REPO/scenario/$NAME"
 OUT="$REPO/build/${NAME}_${VERSION}"
@@ -17,6 +17,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 cp -r "$SRC/scripts" "$OUT/scripts"
 cp -r "$SRC/locale" "$OUT/locale"
+cp "$SRC/changelog.txt" "$OUT/changelog.txt"
 
 cat > "$OUT/info.json" <<JSON
 {
