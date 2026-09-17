@@ -1,0 +1,14 @@
+---------------------------------------------------------------------------------------------------
+Version: 0.2.0
+Date: 2026-09-17
+  Features:
+    - Tax train now fuels itself with the best fuel your tech tree allows, instead of a fixed choice.
+    - The upcoming tax is published on a constant combinator for circuit integration.
+  Changes:
+    - Verified running with Space Age, Elevated Rails, and Quality enabled alongside the base game.
+---------------------------------------------------------------------------------------------------
+Version: 0.1.0
+Date: 2026-09-15
+  Features:
+    - Initial release: recurring tax train, tech-gated demand, proportional biter punishment.
+    - Ships as both a scenario and a mod built from the same sources.
